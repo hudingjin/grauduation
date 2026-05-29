@@ -15,7 +15,7 @@ AttitudeDialog::AttitudeDialog(QWidget *parent) :
     setDefaultValues();
 
     setWindowTitle("姿参数设- 6-DOF模式");
-    setFixedSize(850, 700);
+    setFixedSize(780, 580);
     setWindowFlags(Qt::Dialog | Qt::WindowCloseButtonHint);
 }
 
@@ -32,7 +32,7 @@ void AttitudeDialog::setupUI()
     // 创建标题
     QLabel* titleLabel = new QLabel("6-DOF 姿态参数设置", this);
     titleLabel->setAlignment(Qt::AlignCenter);
-    titleLabel->setStyleSheet("color: #00d4ff; font-size: 16px; font-weight: bold; padding: 10px;");
+    titleLabel->setStyleSheet("color: #00d4ff; font-size: 18px; font-weight: bold; padding: 12px;");
     m_mainLayout->addWidget(titleLabel);
 
     // 创建标签
@@ -41,7 +41,7 @@ void AttitudeDialog::setupUI()
     // ========== 初始姿标签页 ==========
     m_tabInitial = new QWidget(this);
     QGridLayout* initialLayout = new QGridLayout(m_tabInitial);
-    initialLayout->setSpacing(20);
+    initialLayout->setSpacing(28);
 
     // 初始姿角度组
     m_groupInitialAngles = new QGroupBox("初始姿角 (°)", m_tabInitial);
@@ -87,7 +87,7 @@ void AttitudeDialog::setupUI()
     // ========== 目标姿标签页 ==========
     m_tabTarget = new QWidget(this);
     QGridLayout* targetLayout = new QGridLayout(m_tabTarget);
-    targetLayout->setSpacing(20);
+    targetLayout->setSpacing(28);
 
     // 目标姿角度组
     m_groupTargetAngles = new QGroupBox("目标姿角 (°)", m_tabTarget);
@@ -133,7 +133,7 @@ void AttitudeDialog::setupUI()
     // ========== 约束标签==========
     m_tabConstraints = new QWidget(this);
     QGridLayout* constraintsLayout = new QGridLayout(m_tabConstraints);
-    constraintsLayout->setSpacing(20);
+    constraintsLayout->setSpacing(28);
 
     // 角度约束
     m_groupRateConstraints = new QGroupBox("最大角速度约束 (°/s)", m_tabConstraints);
@@ -211,21 +211,21 @@ void AttitudeDialog::setupUI()
 
     // 按钮布局
     m_buttonLayout = new QHBoxLayout();
-    m_buttonLayout->setSpacing(20);
+    m_buttonLayout->setSpacing(28);
 
     m_btnReset = new QPushButton("重置", this);
     m_btnReset->setObjectName("btnReset");
-    m_btnReset->setFixedSize(100, 30);
+    m_btnReset->setFixedSize(110, 34);
 
     m_buttonLayout->addStretch();
     m_buttonLayout->addWidget(m_btnReset);
 
     m_btnCancel = new QPushButton("取消", this);
-    m_btnCancel->setFixedSize(100, 30);
+    m_btnCancel->setFixedSize(110, 34);
     m_buttonLayout->addWidget(m_btnCancel);
 
     m_btnOk = new QPushButton("确定", this);
-    m_btnOk->setFixedSize(100, 30);
+    m_btnOk->setFixedSize(110, 34);
     m_buttonLayout->addWidget(m_btnOk);
 
     m_mainLayout->addLayout(m_buttonLayout);
@@ -290,10 +290,11 @@ void AttitudeDialog::setupStyles()
 
         QGroupBox {
             font-weight: bold;
-            border: 2px solid #0d3a5c;
-            border-radius: 5px;
-            margin-top: 10px;
-            padding-top: 10px;
+            font-size: 13px;
+            border: 2px solid #1a5b8c;
+            border-radius: 6px;
+            margin-top: 12px;
+            padding-top: 14px;
             background-color: #0a2b4a;
             color: #ffffff;
         }
@@ -306,19 +307,19 @@ void AttitudeDialog::setupStyles()
         }
 
         QLabel {
-            color: #7aa8cc;
-            font-size: 11px;
+            color: #aaccee;
+            font-size: 13px;
             font-weight: normal;
         }
 
         QLineEdit {
             background-color: #061424;
             border: 1px solid #0d3a5c;
-            border-radius: 3px;
-            padding: 4px 6px;
+            border-radius: 5px;
+            padding: 8px 10px;
             color: #ffffff;
             font-family: 'Consolas', 'Courier New', monospace;
-            font-size: 11px;
+            font-size: 13px;
             selection-background-color: #1a5b8c;
         }
 
@@ -334,6 +335,7 @@ void AttitudeDialog::setupStyles()
 
         QPushButton {
             background-color: #1a5b8c;
+            font-size: 13px;
             color: #ffffff;
             border: 1px solid #0d3a5c;
             border-radius: 3px;
@@ -440,7 +442,7 @@ QLineEdit* AttitudeDialog::createNumberEdit(const QString& placeholder, double m
     edit->setPlaceholderText(placeholder);
     edit->setValidator(new QDoubleValidator(min, max, decimals, edit));
     edit->setAlignment(Qt::AlignRight);
-    edit->setFixedHeight(25);
+    edit->setFixedHeight(34);
     return edit;
 }
 

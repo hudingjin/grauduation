@@ -78,6 +78,16 @@ TrajectoryResult TrajectoryGenerator::generateTrajectory(const FlightParams& par
     return result;
 }
 
+static ruckig::Synchronization parseSyncMode(const QString& mode)
+{
+    if (mode.contains("PHASE", Qt::CaseInsensitive))
+        return ruckig::Synchronization::Phase;
+    if (mode.contains("NONE", Qt::CaseInsensitive))
+        return ruckig::Synchronization::None;
+    // TIME (default) and TimeIfNecessary both map to Time for simplicity
+    return ruckig::Synchronization::Time;
+}
+
 TrajectoryResult TrajectoryGenerator::generate1DOF(const FlightParams& params)
 {
     TrajectoryResult result;
@@ -103,6 +113,7 @@ TrajectoryResult TrajectoryGenerator::generate1DOF(const FlightParams& params)
         input.max_velocity = {params.getLimits().velX};
         input.max_acceleration = {params.getLimits().accX};
         input.max_jerk = {params.getLimits().jerkX};
+        input.synchronization = parseSyncMode(params.getConfig().syncMode);
         
         // 计算轨迹
         auto calcResult = otg.calculate(input, trajectory);
@@ -242,6 +253,7 @@ TrajectoryResult TrajectoryGenerator::generate3DOF(const FlightParams& params)
         input.max_velocity = {limits.velX, limits.velY, limits.velZ};
         input.max_acceleration = {limits.accX, limits.accY, limits.accZ};
         input.max_jerk = {limits.jerkX, limits.jerkY, limits.jerkZ};
+        input.synchronization = parseSyncMode(params.getConfig().syncMode);
         
         // 计算轨迹
         auto calcResult = otg.calculate(input, trajectory);
@@ -415,6 +427,7 @@ TrajectoryResult TrajectoryGenerator::generate6DOF(const FlightParams& params)
             limits.jerkX, limits.jerkY, limits.jerkZ,
             attitude.maxRollJerk, attitude.maxPitchJerk, attitude.maxYawJerk
         };
+        input.synchronization = parseSyncMode(params.getConfig().syncMode);
 
         auto calcResult = otg.calculate(input, trajectory);
         if (calcResult != ruckig::Result::Working) {

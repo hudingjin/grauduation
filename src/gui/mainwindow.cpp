@@ -585,9 +585,8 @@ double MainWindow::safeReadDouble(QLineEdit* edit)
     qDebug() << "UI数据采集完成，准备传入算法核.."
              << m_flightParams.getConfig().dof
              << "??VelX:" << m_flightParams.getLimits().velX;
-    // ?? QtConcurrent ??????????? GUI ??
+    // ?? QtConcurrent GUI
     if (m_simManager) {
-        // ?????????????????
         core::FlightParams paramsCopy = m_flightParams;
         core::SimulationManager* mgr = m_simManager;
         auto future = QtConcurrent::run([mgr, paramsCopy]() {
