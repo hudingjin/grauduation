@@ -255,6 +255,9 @@ void ChartWidget::clear()
     if (m_chart) {
         m_chart->removeAllSeries();
     }
+    m_ghostSeries.clear();
+    m_dynamicSeries.clear();
+    m_seriesX = m_seriesY = m_seriesZ = nullptr;
 
     m_seriesX = nullptr;
     m_seriesY = nullptr;
@@ -462,4 +465,83 @@ void ChartWidget::setDataForDOF(const QVector<QPointF>& xData,
              << (m_seriesX ? "X" : "")
              << (m_seriesY ? "Y" : "")
              << (m_seriesZ ? "Z" : "");
+}
+// ==================== dong tai hui tu ====================
+
+
+void ChartWidget::setupDynamicMode(const QVector<QPointF>& xData,
+                                    const QVector<QPointF>& yData,
+                                    const QVector<QPointF>& zData,
+                                    int dof)
+{
+    m_fullXDyn = xData; m_fullYDyn = yData; m_fullZDyn = zData;
+    m_dynamicDof = dof; m_dynamicIndex = 0;
+
+    for (auto* s : m_ghostSeries) { m_chart->removeSeries(s); delete s; }
+    m_ghostSeries.clear();
+    for (auto* s : m_dynamicSeries) { m_chart->removeSeries(s); delete s; }
+    m_dynamicSeries.clear();
+    m_chart->removeAllSeries();
+    m_seriesX = m_seriesY = m_seriesZ = nullptr;
+
+    QColor gc[3] = {
+        QColor(0xff,0x33,0x66,60),
+        QColor(0x55,0xdd,0xff,60),
+        QColor(0x00,0xff,0x9f,60)
+    };
+
+    auto mkGhost = [this](const QVector<QPointF>& d, const QColor& c) {
+        if (d.isEmpty()) return;
+        auto* s = new QSplineSeries();
+        QPen p = s->pen(); p.setWidthF(1.0); p.setStyle(Qt::DashLine); s->setPen(p);
+        s->setColor(c); s->replace(d);
+        m_chart->addSeries(s); s->attachAxis(m_axisX); s->attachAxis(m_axisY);
+        m_ghostSeries.append(s);
+    };
+
+    mkGhost(xData, gc[0]);
+    if (dof >= 3) { mkGhost(yData, gc[1]); mkGhost(zData, gc[2]); }
+
+    auto mkDyn = [this](const QColor& c) {
+        auto* s = new QSplineSeries();
+        QPen p = s->pen(); p.setWidthF(2.0); s->setPen(p);
+        s->setColor(c);
+        m_chart->addSeries(s); s->attachAxis(m_axisX); s->attachAxis(m_axisY);
+        m_dynamicSeries.append(s);
+    };
+
+    mkDyn(QColor(0xff,0x33,0x66));
+    if (dof >= 3) { mkDyn(QColor(0x55,0xdd,0xff)); mkDyn(QColor(0x00,0xff,0x9f)); }
+
+    if (!xData.isEmpty()) {
+        double xm = xData.first().x(), xM = xData.last().x();
+        if (qAbs(xM - xm) < 1e-6) { xm -= 0.5; xM += 0.5; }
+        m_axisX->setRange(xm, xM);
+    }
+    m_chart->legend()->setVisible(false);
+}
+
+void ChartWidget::appendDynamicPoint(const QPointF& xPt,
+                                      const QPointF& yPt,
+                                      const QPointF& zPt,
+                                      int dof)
+{
+    if (m_dynamicSeries.size() >= 1 && m_dynamicSeries[0])
+        m_dynamicSeries[0]->append(xPt);
+    if (dof >= 3 && m_dynamicSeries.size() >= 2 && m_dynamicSeries[1])
+        m_dynamicSeries[1]->append(yPt);
+    if (dof >= 3 && m_dynamicSeries.size() >= 3 && m_dynamicSeries[2])
+        m_dynamicSeries[2]->append(zPt);
+    ++m_dynamicIndex;
+}
+
+void ChartWidget::resetDynamicMode()
+{
+    for (auto* s : m_ghostSeries) { m_chart->removeSeries(s); delete s; }
+    m_ghostSeries.clear();
+    for (auto* s : m_dynamicSeries) { m_chart->removeSeries(s); delete s; }
+    m_dynamicSeries.clear();
+    m_seriesX = m_seriesY = m_seriesZ = nullptr;
+    m_fullXDyn.clear(); m_fullYDyn.clear(); m_fullZDyn.clear();
+    m_dynamicIndex = 0; m_dynamicDof = 3;
 }

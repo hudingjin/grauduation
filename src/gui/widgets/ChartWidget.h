@@ -45,6 +45,17 @@ public:
     static QVector<QPointF> downsampleData(const QVector<QPointF>& data, int maxPoints);
 
     void updateCurrentTime(double time);
+
+    // ---- dong tai hui tu ----
+    void setupDynamicMode(const QVector<QPointF>& xData,
+                          const QVector<QPointF>& yData,
+                          const QVector<QPointF>& zData,
+                          int dof);
+    void appendDynamicPoint(const QPointF& xPt,
+                            const QPointF& yPt,
+                            const QPointF& zPt,
+                            int dof);
+    void resetDynamicMode();
     void clearChart() { clear(); }  // 为了向后兼容
     void setDataForDOF(const QVector<QPointF>& xData,
                    const QVector<QPointF>& yData = QVector<QPointF>(),
@@ -73,6 +84,13 @@ private:
     QValueAxis* m_axisY;
     QWidget* m_container;
     QGraphicsLineItem* m_timeIndicator = nullptr;
+
+    // dong tai hui tu members
+    QVector<QPointF> m_fullXDyn, m_fullYDyn, m_fullZDyn;
+    QVector<QSplineSeries*> m_dynamicSeries;
+    QVector<QSplineSeries*> m_ghostSeries;
+    int m_dynamicDof = 3;
+    int m_dynamicIndex = 0;
 };
 
 #endif // CHARTWIDGET_H

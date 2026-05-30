@@ -584,7 +584,7 @@ double MainWindow::safeReadDouble(QLineEdit* edit)
     // 必须通过 getConfig() 获取
     qDebug() << "UI数据采集完成，准备传入算法核.."
              << m_flightParams.getConfig().dof
-             << "??VelX:" << m_flightParams.getLimits().velX;
+             << "VelX:" << m_flightParams.getLimits().velX;
     // ?? QtConcurrent GUI
     if (m_simManager) {
         core::FlightParams paramsCopy = m_flightParams;
@@ -684,7 +684,6 @@ void MainWindow::on_btnReset_clicked()
     if (m_dataTable) m_dataTable->clearTable();
     clearAllErrorStates();
     updateStatusMessage("复位完成，请重新生成轨迹", false);
-    ui->centralwidget->adjustSize();
 }
 
 
@@ -855,6 +854,33 @@ void MainWindow::onSimulationTimeUpdated(double time)
 void MainWindow::onRealtimeStateUpdated(const core::TrajectoryPoint& state)
 {
     // 实时更新图表指示
+    // dong tai hui tu: zhui jia shi shi shu ju dian
+    int dof = m_currentDOF;
+    if (m_positionChart) {
+        m_positionChart->appendDynamicPoint(
+            QPointF(state.time, state.x),
+            QPointF(state.time, state.y),
+            QPointF(state.time, state.z), dof);
+    }
+    if (m_velocityChart) {
+        m_velocityChart->appendDynamicPoint(
+            QPointF(state.time, state.vx),
+            QPointF(state.time, state.vy),
+            QPointF(state.time, state.vz), dof);
+    }
+    if (m_accelerationChart) {
+        m_accelerationChart->appendDynamicPoint(
+            QPointF(state.time, state.ax),
+            QPointF(state.time, state.ay),
+            QPointF(state.time, state.az), dof);
+    }
+    if (m_attitudeChart) {
+        m_attitudeChart->appendDynamicPoint(
+            QPointF(state.time, state.roll),
+            QPointF(state.time, state.pitch),
+            QPointF(state.time, state.yaw), dof);
+    }
+
     if (m_positionChart) m_positionChart->updateCurrentTime(state.time);
     if (m_velocityChart) m_velocityChart->updateCurrentTime(state.time);
     if (m_accelerationChart) m_accelerationChart->updateCurrentTime(state.time);
@@ -975,6 +1001,7 @@ void MainWindow::updateChartsWithTrajectory(const core::TrajectoryResult& result
             }
         }
         m_positionChart->setDataForDOF(posX, posY, posZ, dof);
+        m_positionChart->setupDynamicMode(posX, posY, posZ, dof);
     }
 
     if (m_velocityChart) {
@@ -988,6 +1015,7 @@ void MainWindow::updateChartsWithTrajectory(const core::TrajectoryResult& result
             }
         }
         m_velocityChart->setDataForDOF(velX, velY, velZ, dof);
+        m_velocityChart->setupDynamicMode(velX, velY, velZ, dof);
     }
 
     if (m_accelerationChart) {
@@ -1001,6 +1029,7 @@ void MainWindow::updateChartsWithTrajectory(const core::TrajectoryResult& result
             jerk.append(QPointF(point.time, 0)); // 加加速度占位
         }
         m_accelerationChart->setDataForDOF(accX, accY, jerk, dof);
+        m_accelerationChart->setupDynamicMode(accX, accY, jerk, dof);
     }
 
     if (m_attitudeChart && dof >= 3) {
@@ -1023,6 +1052,7 @@ void MainWindow::updateChartsWithTrajectory(const core::TrajectoryResult& result
             yaw.append(QPointF(point.time, yawAngle));
         }
         m_attitudeChart->setDataForDOF(roll, pitch, yaw, dof);
+        m_attitudeChart->setupDynamicMode(roll, pitch, yaw, dof);
     }}
 
 void MainWindow::setupTableControls()
@@ -1643,6 +1673,7 @@ void MainWindow::setupDOFConnections()
 // 2. 根据DOF更新UI
 void MainWindow::updateUIForDOF(int dof)
 {
+    ui->centralwidget->setUpdatesEnabled(false);
     qDebug() << "正在更新UI：" << dof << "-DOF mode";
     clearAllErrorStates();
     // 记录当前选中的DOF
@@ -1806,8 +1837,8 @@ void MainWindow::updateUIForDOF(int dof)
 }
 
     // 强制刷新布局
-    ui->centralwidget->adjustSize();
     qDebug() << "DOF UI更新完成，模式：" << dof << "，m_currentDOF =" << m_currentDOF;
+    ui->centralwidget->setUpdatesEnabled(true);
 }
 
 // 3. 重置DOF特定输入
@@ -2145,6 +2176,7 @@ void MainWindow::disableAllInputsDuringSimulation()
 void MainWindow::enableAllInputsAfterReset()
 {
     qDebug() << "复位后重新启用输入控件";
+    ui->centralwidget->setUpdatesEnabled(false);
 
     int currentDOF = m_currentDOF;
 
@@ -2231,4 +2263,5 @@ void MainWindow::enableAllInputsAfterReset()
     }
 
     qDebug() << "Inputs restored for DOF" << currentDOF;
+    ui->centralwidget->setUpdatesEnabled(true);
 }
