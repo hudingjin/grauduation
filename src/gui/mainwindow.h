@@ -1,16 +1,20 @@
     #ifndef MAINWINDOW_H
     #define MAINWINDOW_H
     #include "../core/FlightParams.h"
+    #include "../core/FlightConfigRepository.h"
     #include "../core/SimulationManager.h"
     #include"dialogs/AttitudeDialog.h"
     #include "widgets/DataTableWidget.h"
+    #include "widgets/FlightDisplayWidget.h"
     #include"TitleBarWidget.h"
     #include <QMainWindow>
+#include <QShowEvent>
     #include <QLineEdit>
     #include <QDebug>
     #include <QMessageBox>
     #include <QButtonGroup>
     #include <QProgressBar>
+    #include <QPushButton>
     #include <QLabel>
     #include <QDialog>
 
@@ -30,13 +34,17 @@
     {
         Q_OBJECT
 
-    public:
+protected:
+        void showEvent(QShowEvent *event) override;
+
+public:
         explicit MainWindow(QWidget *parent = nullptr);
         ~MainWindow() override ;
 
     private slots:
         void on_btnGenerate_clicked();
 
+        void on_btnAnimation_clicked();
         void onZoomTableClicked();
 
         // 用于实现：用户一旦输入，红色边框消失
@@ -48,6 +56,7 @@
         void on_btnReset_clicked();
 
         void on_btnExport_clicked();
+        void onImportHistoryClicked();
 
 
         // SimulationManager信号槽
@@ -67,6 +76,8 @@
         bool m_simulationRunning = false;  // 标记仿真是否运行
         // 核心数据对象
         core::FlightParams m_flightParams;
+        core::FlightConfigRepository* m_configRepository = nullptr;
+        QPushButton* m_btnImportHistory = nullptr;
         core::SimulationManager* m_simManager;  // 仿真管理器指针
 
         // UI控件
@@ -80,6 +91,10 @@
         ChartWidget* m_attitudeChart = nullptr;
         // 数据表格控件
         DataTableWidget* m_dataTable = nullptr;
+        // 飞行轨迹俯视显示
+        FlightDisplayWidget* m_flightDisplay = nullptr;
+        QPushButton* m_btnAnimation = nullptr;
+        QDialog* m_animationDialog = nullptr;
         // 创建放大表格
         QTableWidget* createZoomedTable();
         // 状态标签指针
@@ -118,6 +133,10 @@
         void showDOFHelp(int dof);
         void setDefaultValuesForDOF(int dof);
         void setupTableControls();
+        void initConfigRepository();
+        void saveCurrentParamsToHistory();
+        void applyFlightParamsToUi(const core::FlightParams& params);
+        static QString formatDoubleForInput(double value);
         // 放大表格对话框
         void showZoomedTableDialog();
         void exportTableToCSV(QTableWidget* table, const QString& filename);

@@ -38,7 +38,7 @@ void TitleBarWidget::setupStyles()
 {
     // 1. 设置Logo样式
     if (m_logoLabel) {
-        QPixmap diamondPixmap(20, 20);
+        QPixmap diamondPixmap(25, 25);
         diamondPixmap.fill(Qt::transparent);
 
         QPainter painter(&diamondPixmap);
@@ -46,25 +46,25 @@ void TitleBarWidget::setupStyles()
         painter.setPen(Qt::NoPen);
 
         QPolygonF outerDiamond;
-        outerDiamond << QPointF(10, 0)
-                    << QPointF(20, 10)
-                    << QPointF(10, 20)
-                    << QPointF(0, 10);
+        outerDiamond << QPointF(12.5, 0)
+                    << QPointF(25, 12.5)
+                    << QPointF(12.5, 25)
+                    << QPointF(0, 12.5);
 
         painter.setBrush(QColor(0, 212, 255));
         painter.drawPolygon(outerDiamond);
 
         QPolygonF innerDiamond;
-        innerDiamond << QPointF(10, 4)
-                    << QPointF(16, 10)
-                    << QPointF(10, 16)
-                    << QPointF(4, 10);
+        innerDiamond << QPointF(12.5, 5)
+                    << QPointF(17.5, 12.5)
+                    << QPointF(12.5, 20)
+                    << QPointF(5, 12.5);
 
         painter.setBrush(QColor(0, 255, 255, 150));
         painter.drawPolygon(innerDiamond);
 
         m_logoLabel->setPixmap(diamondPixmap);
-        m_logoLabel->setFixedSize(20, 20);
+        m_logoLabel->setFixedSize(25, 25);
         m_logoLabel->setStyleSheet("background: transparent; border: none;");
     }
 
@@ -77,7 +77,7 @@ void TitleBarWidget::setupStyles()
             "   font-size: 20px;"
             "   font-weight: 600;"
             "   background: transparent;"
-            "   padding-left: 12px;"
+            "   padding-left: 2px;"
             "   letter-spacing: 0.8px;"
             "}"
         );
@@ -93,7 +93,7 @@ void TitleBarWidget::setupStyles()
             "   font-family: 'Consolas', 'Courier New', monospace;"
             "   font-size: 10px;"
             "   background: transparent;"
-            "   padding-left: 12px;"
+            "   padding-left: 2px;"
             "   letter-spacing: 0.5px;"
             "}"
         );

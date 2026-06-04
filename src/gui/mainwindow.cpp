@@ -2,16 +2,27 @@
 #include "cmake-build-debug/aircraftSystem_autogen/include/ui_mainwindow.h"
 #include "qchartview.h"
 #include "widgets/TitleBarWidget.h"
+#ifdef Q_OS_WIN
+#include <dwmapi.h>
+#ifndef DWMWA_USE_IMMERSIVE_DARK_MODE
+#define DWMWA_USE_IMMERSIVE_DARK_MODE 20
+#endif
+#ifndef DWMWA_CAPTION_COLOR
+#define DWMWA_CAPTION_COLOR 35
+#endif
+#endif
 #include "widgets/ChartWidget.h"
 #include <QLabel>
 #include <QVBoxLayout>
 #include <QDoubleValidator>
 #include <QButtonGroup>
+#include <QDateTime>
 #include <QProgressBar>
 #include <QStatusBar>
 #include <QTimer>
 #include <QStyle>
 #include <QApplication>
+#include <QColor>
 #include <QSplineSeries>
 #include <QTextStream>
 #include <QtConcurrent/QtConcurrent>
@@ -23,7 +34,12 @@
 #include <QFileDialog>
 #include <QKeySequence>
 #include <QHeaderView>
+#include <QAbstractItemView>
+#include <QDialogButtonBox>
+#include <QPushButton>
+#include <QSignalBlocker>
 #include "StatusWidget.h"
+#include "widgets/FlightDisplayWidget.h"
 
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent)
@@ -84,6 +100,7 @@ MainWindow::MainWindow(QWidget *parent)
     // 初始化控制面
     initControlPanel();
     setupTableControls();
+    initConfigRepository();
 
     // 初始化仿真管理器
     m_simManager = new core::SimulationManager(this);
@@ -113,6 +130,10 @@ MainWindow::MainWindow(QWidget *parent)
     } else {
         updateStatusMessage("使用模拟轨迹生成算法", true);
     }
+
+    // 初始化飞行俯视图控件（延迟到点击"动画演示"按钮时创建）
+    m_flightDisplay = nullptr;
+    qDebug() << "FlightDisplayWidget延迟初始化完成";
 }
 
 MainWindow::~MainWindow()
@@ -162,7 +183,52 @@ void MainWindow::initControlPanel()
     ui->btnPlay->setToolTip("开继续仿真");
     ui->btnStop->setToolTip("暂停/停止仿真");
     ui->btnReset->setToolTip("Reset system state");
+    if (!m_btnImportHistory) {
+        m_btnImportHistory = new QPushButton(QStringLiteral("导入历史参数"), this);
+        m_btnImportHistory->setObjectName(QStringLiteral("btnImportHistory"));
+        m_btnImportHistory->setFixedHeight(28);
+        m_btnImportHistory->setToolTip(QStringLiteral("从历史成功运行参数中选择并导入"));
+        m_btnImportHistory->setStyleSheet(QStringLiteral(
+            "QPushButton#btnImportHistory {"
+            "background: rgba(0, 255, 159, 0.06); border: 1px solid rgba(0, 255, 159, 0.65);"
+            "color: rgb(0, 255, 159); font-size: 11px; font-weight: 600; padding: 0 8px;"
+            "}"
+            "QPushButton#btnImportHistory:hover { background-color: rgba(0, 255, 159, 0.10); }"));
+        if (QVBoxLayout* inputLayout = findChild<QVBoxLayout*>(QStringLiteral("verticalLayout_6"))) {
+            inputLayout->insertWidget(0, m_btnImportHistory);
+        }
+        connect(m_btnImportHistory, &QPushButton::clicked,
+                this, &MainWindow::onImportHistoryClicked);
+    }
     ui->btnExport->setToolTip("导出轨迹数据");
+
+    // 创建动画演示按钮，插入到actionRowMid和actionRowBottom之间
+    m_btnAnimation = new QPushButton(QString::fromUtf8("◈ 动画演示"), this);
+    m_btnAnimation->setObjectName(QStringLiteral("btnAnimation"));
+    m_btnAnimation->setEnabled(false);
+    m_btnAnimation->setToolTip(QString::fromUtf8("打开飞行轨迹俯视动画窗口"));
+    m_btnAnimation->setStyleSheet(QStringLiteral(
+        "QPushButton#btnAnimation {"
+        "  height: 30px; min-height: 34px;"
+        "  color: rgb(0, 196, 255);"
+        "  border: 1px solid rgb(0, 196, 255);"
+        "  background: transparent;"
+        "  font-size: 12px; font-weight: 600; letter-spacing: 2px;"
+        "  padding: 0 8px;"
+        "}"
+        "QPushButton#btnAnimation:hover { background-color: rgba(0, 196, 255, 0.10); }"
+    ));
+
+    // 直接放到生成轨迹按钮旁边（actionRowTop的布局中）
+    QWidget* actionRowTop = findChild<QWidget*>(QStringLiteral("actionRowTop"));
+    if (actionRowTop && actionRowTop->layout()) {
+        QHBoxLayout* hLayout = qobject_cast<QHBoxLayout*>(actionRowTop->layout());
+        if (hLayout) {
+            hLayout->addWidget(m_btnAnimation);
+        }
+    }
+
+    connect(m_btnAnimation, &QPushButton::clicked, this, &MainWindow::on_btnAnimation_clicked);
 }
 
 
@@ -208,16 +274,21 @@ void MainWindow::updateUIForState(core::SimulationState state)
         ui->btnStop->setEnabled(false);
         ui->btnReset->setEnabled(false);
         ui->btnExport->setEnabled(false);
+        if (m_btnAnimation) m_btnAnimation->setEnabled(false);
         updateStatusMessage("空闲状态，可以生成轨迹迹", false);
         updatePlayButtonState(state);
         break;
 
     case core::SimulationState::Generating:
         ui->btnGenerate->setEnabled(false);
+        if (m_btnImportHistory) {
+            m_btnImportHistory->setEnabled(false);
+        }
         ui->btnPlay->setEnabled(false);
         ui->btnStop->setEnabled(false);
         ui->btnReset->setEnabled(false);
         ui->btnExport->setEnabled(false);
+        if (m_btnAnimation) m_btnAnimation->setEnabled(false);
         updateStatusMessage("正在生成轨迹迹...", false);
         updatePlayButtonState(state);
         break;
@@ -228,6 +299,7 @@ void MainWindow::updateUIForState(core::SimulationState state)
         ui->btnStop->setEnabled(false);
         ui->btnReset->setEnabled(true);
         ui->btnExport->setEnabled(true);
+        if (m_btnAnimation) m_btnAnimation->setEnabled(true);
         updateStatusMessage("轨迹就绪，可以开始仿真", false);
         updatePlayButtonState(state);
         break;
@@ -238,6 +310,7 @@ void MainWindow::updateUIForState(core::SimulationState state)
         ui->btnStop->setEnabled(true);
         ui->btnReset->setEnabled(false);
         ui->btnExport->setEnabled(false);
+        if (m_btnAnimation) m_btnAnimation->setEnabled(true);
         updateStatusMessage("仿真运行..", false);
         updatePlayButtonState(state);
         break;
@@ -248,6 +321,7 @@ void MainWindow::updateUIForState(core::SimulationState state)
         ui->btnStop->setEnabled(true);
         ui->btnReset->setEnabled(false);
         ui->btnExport->setEnabled(true);
+        if (m_btnAnimation) m_btnAnimation->setEnabled(true);
         updateStatusMessage("仿真已暂停", false);
         updatePlayButtonState(state);
         break;
@@ -258,6 +332,7 @@ void MainWindow::updateUIForState(core::SimulationState state)
         ui->btnStop->setEnabled(false);
         ui->btnReset->setEnabled(true);
         ui->btnExport->setEnabled(true);
+        if (m_btnAnimation) m_btnAnimation->setEnabled(true);
         updateStatusMessage("仿真已停止", false);
         updatePlayButtonState(state);
         break;
@@ -268,6 +343,7 @@ void MainWindow::updateUIForState(core::SimulationState state)
         ui->btnStop->setEnabled(false);
         ui->btnReset->setEnabled(true);
         ui->btnExport->setEnabled(false);
+        if (m_btnAnimation) m_btnAnimation->setEnabled(false);
         updateStatusMessage("系统错误，请检查参数", true);
         updatePlayButtonState(state);
         break;
@@ -406,17 +482,6 @@ bool MainWindow::validateInputs()
 {
     // 清除所有错误状态
     clearAllErrorStates();
-
-    // int dof = m_dofGroup ? m_dofGroup->checkedId() : 3;  // 默认3-DOF
-    // QList<QLineEdit*> allEdits = this->findChildren<QLineEdit*>();
-    // for (QLineEdit* edit : allEdits) {
-    //     if (edit->property("error") == "true") {
-    //         edit->setProperty("error", "false");
-    //         edit->style()->unpolish(edit);
-    //         edit->style()->polish(edit);
-    //     }
-    // }
-    // 添加详细的调试信
     qDebug() << "=== 开始输入验证===";
     qDebug() << "当前DOF模式(m_currentDOF):" << m_currentDOF;
     qDebug() << "DOF按钮组中ID:" << (m_dofGroup ? m_dofGroup->checkedId() : -1);
@@ -465,7 +530,6 @@ double MainWindow::safeReadDouble(QLineEdit* edit)
     // 2. 检查当前状态
     core::SimulationState currentState = m_simManager->getState();
     qDebug() << "当前仿真状态" << static_cast<int>(currentState);
-    // Do not allow a second generation while a trajectory exists or simulation is active.
     if (currentState == core::SimulationState::Generating ||
         currentState == core::SimulationState::Ready ||
         currentState == core::SimulationState::Running ||
@@ -531,7 +595,6 @@ double MainWindow::safeReadDouble(QLineEdit* edit)
         ui->btnGenerate->setEnabled(true);
         return;
     }
-
     // 转换为秒（Ruckig需要秒为单位）
     config.deltaT = cycleTime / 1000.0;  // 毫秒转秒
 
@@ -575,17 +638,14 @@ double MainWindow::safeReadDouble(QLineEdit* edit)
     if (config.dof == 6) {
         m_flightParams.setAttitudeParams(m_attitudeParams);
     }
-    // ------------------------------------------------
     // 7. 验证打印与后续操
-    // ==========================================
     // 调用类内部的打印函数
     m_flightParams.printDebug();
-    // 【修正这里不能直接访dof，因m_flightParams 是类对象，dof 是其私有成员结构体内的数
     // 必须通过 getConfig() 获取
     qDebug() << "UI数据采集完成，准备传入算法核.."
              << m_flightParams.getConfig().dof
              << "VelX:" << m_flightParams.getLimits().velX;
-    // ?? QtConcurrent GUI
+    //  QtConcurrent GUI
     if (m_simManager) {
         core::FlightParams paramsCopy = m_flightParams;
         core::SimulationManager* mgr = m_simManager;
@@ -680,8 +740,7 @@ void MainWindow::on_btnReset_clicked()
     if (m_attitudeChart) m_attitudeChart->clear();
     if (m_accelerationChart) m_accelerationChart->clear();
     if (m_dataTable) m_dataTable->clearTable();
-    // 清空数据表格
-    if (m_dataTable) m_dataTable->clearTable();
+    if (m_flightDisplay) m_flightDisplay->clear();
     clearAllErrorStates();
     updateStatusMessage("复位完成，请重新生成轨迹", false);
 }
@@ -779,20 +838,12 @@ void MainWindow::onTrajectoryGenerated(const core::TrajectoryResult& result)
                 // 更新起始速度
                 m_statusWidget->updateSpeed(firstPoint.vx, firstPoint.vy, firstPoint.vz);
 
-                // 更新起始姿
-                double roll = qRadiansToDegrees(atan2(firstPoint.vy, firstPoint.vx));
-                double pitch = qRadiansToDegrees(atan2(firstPoint.vz,
-                    sqrt(firstPoint.vx*firstPoint.vx + firstPoint.vy*firstPoint.vy)));
-                double yaw = 0.0;  // 简化的航向角
-                if (qAbs(firstPoint.x) > 1e-6 || qAbs(firstPoint.y) > 1e-6) {
-                    yaw = qRadiansToDegrees(atan2(firstPoint.y, firstPoint.x + 1e-6));
-                }
+                // 3-DOF无真实姿态数据，设为0；6-DOF使用Ruckig计算的真值
                 if (result.dof == 6) {
-                    roll = firstPoint.roll;
-                    pitch = firstPoint.pitch;
-                    yaw = firstPoint.yaw;
+                    m_statusWidget->updateAttitude(firstPoint.roll, firstPoint.pitch, firstPoint.yaw);
+                } else {
+                    m_statusWidget->updateAttitude(0.0, 0.0, 0.0);
                 }
-                m_statusWidget->updateAttitude(roll, pitch, yaw);
             }
 
             // 更新仿真进度
@@ -802,10 +853,17 @@ void MainWindow::onTrajectoryGenerated(const core::TrajectoryResult& result)
         // 更新图表
         updateChartsWithTrajectory(result);
 
+        // 更新飞行俯视图
+        if (m_flightDisplay) {
+            m_flightDisplay->setTrajectoryData(result);
+        }
+
         // 更新数据表格
         if (m_dataTable) {
             m_dataTable->setTrajectoryData(result);
         }
+
+        saveCurrentParamsToHistory();
 
         disableAllInputsDuringSimulation();
         ui->btnReset->setEnabled(true);
@@ -904,22 +962,17 @@ void MainWindow::onRealtimeStateUpdated(const core::TrajectoryPoint& state)
         // 更新速度
         m_statusWidget->updateSpeed(state.vx, state.vy, state.vz);
 
-        // 修复：使用与图表相同的Yaw计算逻辑
-        double roll = qRadiansToDegrees(atan2(state.vy, state.vx));
-        double pitch = qRadiansToDegrees(atan2(state.vz, sqrt(state.vx*state.vx + state.vy*state.vy)));
-
-        // 修复：从位置计算Yaw（与updateChartsWithTrajectory中的逻辑保持一致）
-        double yaw = 0.0;
-        if (qAbs(state.x) > 1e-6 || qAbs(state.y) > 1e-6) {
-            yaw = qRadiansToDegrees(atan2(state.y, state.x + 1e-6));
-        }
+        // 3-DOF无真实姿态数据，设为0；6-DOF使用Ruckig计算的真值
         if (m_currentDOF == 6) {
-            roll = state.roll;
-            pitch = state.pitch;
-            yaw = state.yaw;
+            m_statusWidget->updateAttitude(state.roll, state.pitch, state.yaw);
+        } else {
+            m_statusWidget->updateAttitude(0.0, 0.0, 0.0);
         }
+    }
 
-        m_statusWidget->updateAttitude(roll, pitch, yaw);
+    // 更新飞行俯视图飞机位置
+    if (m_flightDisplay) {
+        m_flightDisplay->updateAircraftState(state);
     }
 }
 void MainWindow::onProgressUpdated(double progress)
@@ -1032,27 +1085,18 @@ void MainWindow::updateChartsWithTrajectory(const core::TrajectoryResult& result
         m_accelerationChart->setupDynamicMode(accX, accY, jerk, dof);
     }
 
-    if (m_attitudeChart && dof >= 3) {
+    if (m_attitudeChart && dof == 6) {
         QVector<QPointF> roll, pitch, yaw;
         for (const auto& point : result.points) {
-            double rollAngle = point.roll;
-            double pitchAngle = point.pitch;
-            double yawAngle = point.yaw;
-
-            if (dof != 6) {
-                // 3-DOF does not carry real attitude state, so keep the old derived display.
-                rollAngle = atan2(point.vy, point.vx) * 180.0 / M_PI;
-                pitchAngle = asin(point.vz /
-                    sqrt(point.vx*point.vx + point.vy*point.vy + point.vz*point.vz + 1e-6)) * 180.0 / M_PI;
-                yawAngle = atan2(point.y, point.x + 1e-6) * 180.0 / M_PI;
-            }
-
-            roll.append(QPointF(point.time, rollAngle));
-            pitch.append(QPointF(point.time, pitchAngle));
-            yaw.append(QPointF(point.time, yawAngle));
+            roll.append(QPointF(point.time, point.roll));
+            pitch.append(QPointF(point.time, point.pitch));
+            yaw.append(QPointF(point.time, point.yaw));
         }
         m_attitudeChart->setDataForDOF(roll, pitch, yaw, dof);
         m_attitudeChart->setupDynamicMode(roll, pitch, yaw, dof);
+    } else if (m_attitudeChart) {
+        // 3-DOF/1-DOF无真实姿态数据，清空图表
+        m_attitudeChart->clear();
     }}
 
 void MainWindow::setupTableControls()
@@ -1214,6 +1258,97 @@ QWidget* MainWindow::createWidgetFromLayout(QLayout* layout)
     QWidget* widget = new QWidget(this);
     widget->setLayout(layout);
     return widget;
+}
+
+void MainWindow::on_btnAnimation_clicked()
+{
+    // 获取轨迹数据
+    if (!m_simManager) return;
+    core::TrajectoryResult traj = m_simManager->getCurrentTrajectory();
+    if (traj.points.isEmpty()) {
+        QMessageBox::information(this, QString::fromUtf8("无数据"), QString::fromUtf8("请先生成轨迹"));
+        return;
+    }
+
+    // 关闭旧对话框
+    if (m_animationDialog) {
+        m_animationDialog->close();
+        m_animationDialog->deleteLater();
+        m_animationDialog = nullptr;
+    }
+
+    const double duration = traj.duration;
+    const double fps = 60.0;
+    const double dt = 1.0 / fps;
+
+    // 创建对话框
+    QDialog* dlg = new QDialog(this, Qt::Window);
+    dlg->setWindowTitle(QString::fromUtf8("✈ 飞行轨迹俯视动画"));
+    dlg->resize(640, 540);
+    dlg->setMinimumSize(400, 300);
+    dlg->setWindowFlags(Qt::Window | Qt::WindowCloseButtonHint);
+    dlg->setStyleSheet(QStringLiteral("QDialog { background-color: #061424; }"));
+
+    auto* mainLayout = new QVBoxLayout(dlg);
+    mainLayout->setContentsMargins(6, 6, 6, 6);
+    mainLayout->setSpacing(4);
+
+    // 俯视图
+    FlightDisplayWidget* display = new FlightDisplayWidget(dlg);
+    display->setTrajectoryData(traj);
+    mainLayout->addWidget(display, 1);
+
+    // 底部控制栏
+    QWidget* bar = new QWidget(dlg);
+    bar->setStyleSheet(QStringLiteral("background: #0a1a2f; border-top: 1px solid #0d3a5c;"));
+    bar->setFixedHeight(42);
+    QHBoxLayout* barLayout = new QHBoxLayout(bar);
+    barLayout->setContentsMargins(12, 4, 12, 4);
+    barLayout->setSpacing(10);
+
+    // 进度条
+    QProgressBar* progress = new QProgressBar(bar);
+    progress->setRange(0, static_cast<int>(duration * 1000));
+    progress->setValue(0);
+    progress->setFormat(QStringLiteral("%v / %1s").arg(duration, 0, 'f', 1));
+    progress->setStyleSheet(QStringLiteral(
+        "QProgressBar { background: #061424; border: 1px solid #0d3a5c; height: 18px; text-align: center; color: #7aa8cc; font-size: 10px; }"
+        "QProgressBar::chunk { background: #00d4ff; }"
+    ));
+    barLayout->addWidget(progress, 1);
+
+    // 进度标签
+    QLabel* timeLabel = new QLabel(QStringLiteral("0.0 / %1s").arg(duration, 0, 'f', 1), bar);
+    timeLabel->setStyleSheet(QStringLiteral("color: #00ff9f; font-family: 'Share Tech Mono'; font-size: 12px; min-width: 120px;"));
+    timeLabel->setAlignment(Qt::AlignCenter);
+    barLayout->addWidget(timeLabel);
+
+    mainLayout->addWidget(bar);
+
+    // 定时器驱动播放
+    QTimer* timer = new QTimer(dlg);
+    double* elapsed = new double(0.0);
+
+    QObject::connect(timer, &QTimer::timeout, dlg, [display, progress, timeLabel, duration, dt, elapsed, timer]() {
+        *elapsed += dt;
+        if (*elapsed >= duration) {
+            *elapsed = duration;
+            timer->stop();
+        }
+        display->setTime(*elapsed);
+        progress->setValue(static_cast<int>(*elapsed * 1000));
+        timeLabel->setText(QStringLiteral("%1 / %2s").arg(*elapsed, 0, 'f', 1).arg(duration, 0, 'f', 1));
+    });
+
+    timer->start(static_cast<int>(dt * 1000));  // ~16ms
+    m_animationDialog = dlg;
+    dlg->exec();  // 模态阻塞主界面，关闭后继续
+
+    // exec返回后清理
+    timer->stop();
+    delete elapsed;
+    m_animationDialog = nullptr;
+    dlg->deleteLater();
 }
 
 void MainWindow::onZoomTableClicked()
@@ -1455,6 +1590,9 @@ void MainWindow::exportTableToCSV(QTableWidget* table, const QString& filename)
     stream.setCodec("UTF-8");
 #endif
 
+    stream << QStringLiteral("\"导出时间\",\"%1\"\n\n")
+                  .arg(QDateTime::currentDateTime().toString(QStringLiteral("yyyy-MM-dd HH:mm:ss")));
+
     // 写入表头
     for (int col = 0; col < table->columnCount(); ++col) {
         QTableWidgetItem* headerItem = table->horizontalHeaderItem(col);
@@ -1654,7 +1792,6 @@ void MainWindow::setupDOFConnections()
                     m_currentDOF = newDOF;
                     updateUIForDOF(newDOF);
                     showDOFHelp(newDOF);
-                    setDefaultValuesForDOF(newDOF);
 
                     qDebug() << "Switched to" << newDOF << "-DOF mode";
                 }
@@ -2158,6 +2295,9 @@ void MainWindow::disableAllInputsDuringSimulation()
 
         // 3. 禁用生成按钮
         ui->btnGenerate->setEnabled(false);
+        if (m_btnImportHistory) {
+            m_btnImportHistory->setEnabled(false);
+        }
 
         // 4. 禁用同步模式下拉
         if (ui->syncComboBox) {
@@ -2252,6 +2392,9 @@ void MainWindow::enableAllInputsAfterReset()
 
     // 4. 重新启用生成按钮
     ui->btnGenerate->setEnabled(true);
+    if (m_btnImportHistory) {
+        m_btnImportHistory->setEnabled(true);
+    }
 
     // 5. 重新启用同步模式下拉
     if (ui->syncComboBox) {
@@ -2264,4 +2407,295 @@ void MainWindow::enableAllInputsAfterReset()
 
     qDebug() << "Inputs restored for DOF" << currentDOF;
     ui->centralwidget->setUpdatesEnabled(true);
+}
+
+void MainWindow::initConfigRepository()
+{
+    if (!m_configRepository) {
+        m_configRepository = new core::FlightConfigRepository(this);
+    }
+
+    if (!m_configRepository->initialize()) {
+        updateStatusMessage(QStringLiteral("历史参数数据库初始化失败: %1").arg(m_configRepository->lastError()), true);
+        if (m_btnImportHistory) {
+            m_btnImportHistory->setEnabled(false);
+        }
+        return;
+    }
+
+    qDebug() << "Flight config database:" << m_configRepository->databasePath();
+}
+
+void MainWindow::saveCurrentParamsToHistory()
+{
+    if (!m_configRepository) {
+        return;
+    }
+
+    if (!m_configRepository->saveSuccessfulConfig(m_flightParams)) {
+        qWarning() << "Failed to save successful flight config:" << m_configRepository->lastError();
+        updateStatusMessage(QStringLiteral("轨迹已生成，但历史参数保存失败: %1").arg(m_configRepository->lastError()), true);
+    }
+}
+
+void MainWindow::onImportHistoryClicked()
+{
+    if (!m_configRepository) {
+        QMessageBox::warning(this, QStringLiteral("历史参数"), QStringLiteral("历史参数数据库未初始化。"));
+        return;
+    }
+
+    const QList<core::FlightConfigSummary> summaries = m_configRepository->loadSummaries();
+    if (summaries.isEmpty()) {
+        QMessageBox::information(this, QStringLiteral("历史参数"), QStringLiteral("还没有成功运行过的历史参数。生成成功一次后会自动保存。"));
+        return;
+    }
+
+    QDialog dialog(this);
+    dialog.setWindowTitle(QStringLiteral("导入历史参数"));
+    dialog.resize(720, 460);
+    dialog.setStyleSheet(QStringLiteral(
+        "QDialog { background-color: #041f3c; color: #d8f3ff; }"
+        "QLabel { color: #aaccee; font-size: 13px; }"
+        "QTableWidget { background-color: #061424; color: #ffffff; gridline-color: rgba(0, 212, 255, 0.18);"
+        "border: 1px solid rgba(0, 212, 255, 0.35); selection-background-color: rgba(0, 212, 255, 0.30);"
+        "selection-color: #ffffff; alternate-background-color: #08213a; }"
+        "QTableWidget::item { padding: 6px 8px; }"
+        "QTableWidget::item:hover { background-color: rgba(0, 255, 159, 0.16); color: #ffffff; }"
+        "QTableWidget::item:selected { background-color: rgba(0, 212, 255, 0.32); color: #ffffff; }"
+        "QTableWidget::item:focus { border: none; outline: none; }"
+        "QHeaderView::section { background-color: #0d3a5c; color: #d8f3ff; border: none;"
+        "border-right: 1px solid rgba(255,255,255,0.08); padding: 7px 8px; font-weight: 600; }"
+        "QPushButton { min-width: 86px; min-height: 30px; border-radius: 3px; padding: 4px 12px;"
+        "background-color: #1a5b8c; color: white; border: 1px solid #00d4ff; font-weight: 600; }"
+        "QPushButton:hover { background-color: #2478b8; }"));
+
+    auto* layout = new QVBoxLayout(&dialog);
+    layout->setContentsMargins(18, 18, 18, 14);
+    layout->setSpacing(12);
+
+    auto* titleLabel = new QLabel(QStringLiteral("选择一组成功运行过的参数，点击“导入”后会自动回填到左侧输入面板。"), &dialog);
+    titleLabel->setWordWrap(true);
+    layout->addWidget(titleLabel);
+
+    auto* table = new QTableWidget(summaries.size(), 4, &dialog);
+    table->setHorizontalHeaderLabels(QStringList{
+        QStringLiteral("ID"),
+        QStringLiteral("成功时间"),
+        QStringLiteral("自由度"),
+        QStringLiteral("配置名称")
+    });
+    table->setAlternatingRowColors(true);
+    table->setSelectionBehavior(QAbstractItemView::SelectRows);
+    table->setSelectionMode(QAbstractItemView::SingleSelection);
+    table->setEditTriggers(QAbstractItemView::NoEditTriggers);
+    table->setFocusPolicy(Qt::NoFocus);
+    table->setMouseTracking(true);
+    table->viewport()->setMouseTracking(true);
+    table->verticalHeader()->setVisible(false);
+    table->horizontalHeader()->setStretchLastSection(true);
+    table->horizontalHeader()->setSectionResizeMode(0, QHeaderView::ResizeToContents);
+    table->horizontalHeader()->setSectionResizeMode(1, QHeaderView::ResizeToContents);
+    table->horizontalHeader()->setSectionResizeMode(2, QHeaderView::ResizeToContents);
+    table->horizontalHeader()->setSectionResizeMode(3, QHeaderView::Stretch);
+
+    for (int row = 0; row < summaries.size(); ++row) {
+        const core::FlightConfigSummary& summary = summaries.at(row);
+        auto* idItem = new QTableWidgetItem(QString::number(summary.id));
+        idItem->setData(Qt::UserRole, summary.id);
+        table->setItem(row, 0, idItem);
+        table->setItem(row, 1, new QTableWidgetItem(summary.createdAt));
+        table->setItem(row, 2, new QTableWidgetItem(QStringLiteral("%1-DOF").arg(summary.dof)));
+        table->setItem(row, 3, new QTableWidgetItem(summary.name));
+    }
+    if (!summaries.isEmpty()) {
+        table->selectRow(0);
+    }
+
+    int hoveredRow = -1;
+    auto refreshHistoryTableRows = [table, &hoveredRow]() {
+        const QColor normalColor(6, 20, 36);
+        const QColor alternateColor(8, 33, 58);
+        const QColor hoverColor(0, 255, 159, 36);
+        const QColor selectedColor(0, 212, 255, 70);
+        const QColor textColor(255, 255, 255);
+
+        const int selectedRow = table->currentRow();
+        for (int row = 0; row < table->rowCount(); ++row) {
+            QColor background = (row % 2 == 0) ? normalColor : alternateColor;
+            if (row == hoveredRow) {
+                background = hoverColor;
+            }
+            if (row == selectedRow) {
+                background = selectedColor;
+            }
+
+            for (int col = 0; col < table->columnCount(); ++col) {
+                if (QTableWidgetItem* item = table->item(row, col)) {
+                    item->setBackground(background);
+                    item->setForeground(textColor);
+                }
+            }
+        }
+    };
+    refreshHistoryTableRows();
+
+    layout->addWidget(table);
+
+    auto* buttons = new QDialogButtonBox(&dialog);
+    QPushButton* importButton = buttons->addButton(QStringLiteral("导入"), QDialogButtonBox::AcceptRole);
+    buttons->addButton(QStringLiteral("取消"), QDialogButtonBox::RejectRole);
+    importButton->setDefault(true);
+    layout->addWidget(buttons);
+
+    connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
+    connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+    connect(table, &QTableWidget::itemEntered, &dialog, [&](QTableWidgetItem* item) {
+        if (!item) {
+            return;
+        }
+        hoveredRow = item->row();
+        refreshHistoryTableRows();
+    });
+    connect(table, &QTableWidget::itemClicked, &dialog, [&](QTableWidgetItem* item) {
+        if (!item) {
+            return;
+        }
+        table->selectRow(item->row());
+        refreshHistoryTableRows();
+    });
+    connect(table, &QTableWidget::cellDoubleClicked, &dialog, [&](int, int) {
+        refreshHistoryTableRows();
+        dialog.accept();
+    });
+
+    if (dialog.exec() != QDialog::Accepted) {
+        return;
+    }
+
+    const QList<QTableWidgetItem*> selectedItems = table->selectedItems();
+    if (selectedItems.isEmpty()) {
+        QMessageBox::warning(this, QStringLiteral("历史参数"), QStringLiteral("请先选择一条历史参数。"));
+        return;
+    }
+
+    const int selectedRow = table->currentRow();
+    const int selectedId = table->item(selectedRow, 0)->data(Qt::UserRole).toInt();
+
+    core::FlightParams params;
+    if (!m_configRepository->loadConfig(selectedId, &params)) {
+        QMessageBox::warning(this, QStringLiteral("历史参数"), QStringLiteral("读取历史参数失败。"));
+        return;
+    }
+
+    applyFlightParamsToUi(params);
+    updateStatusMessage(QStringLiteral("历史参数已导入，可直接生成轨迹"), false);
+}
+
+void MainWindow::applyFlightParamsToUi(const core::FlightParams& params)
+{
+    const auto& config = params.getConfig();
+    const auto& limits = params.getLimits();
+    const auto& start = params.getStartState();
+    const auto& target = params.getTargetState();
+
+    const int dof = (config.dof == 1 || config.dof == 3 || config.dof == 6) ? config.dof : 3;
+    m_currentDOF = dof;
+    m_flightParams = params;
+
+    if (m_dofGroup) {
+        QSignalBlocker groupBlocker(m_dofGroup);
+        if (QAbstractButton* button = m_dofGroup->button(dof)) {
+            QSignalBlocker buttonBlocker(button);
+            button->setChecked(true);
+        }
+    }
+
+    if (dof == 6) {
+        m_attitudeParams = params.getAttitudeParams();
+        if (m_attitudeDialog) {
+            m_attitudeDialog->setAttitudeParams(m_attitudeParams);
+        }
+    } else {
+        m_attitudeParams.reset();
+    }
+
+    updateUIForDOF(dof);
+
+    ui->VXlineEdit->setText(formatDoubleForInput(limits.velX));
+    ui->accXlineEdit->setText(formatDoubleForInput(limits.accX));
+    ui->JXlineEdit->setText(formatDoubleForInput(limits.jerkX));
+
+    ui->editP0X->setText(formatDoubleForInput(start.x));
+    ui->editV0X->setText(formatDoubleForInput(start.vx));
+    ui->editPfX->setText(formatDoubleForInput(target.x));
+    ui->editVfX->setText(formatDoubleForInput(target.vx));
+
+    if (dof == 1) {
+        ui->VYlineEdit->clear();
+        ui->VZlineEdit->clear();
+        ui->accYlineEdit->clear();
+        ui->accZlineEdit->clear();
+        ui->JYlineEdit->clear();
+        ui->JZlineEdit->clear();
+        ui->editP0Y->clear();
+        ui->editP0Z->clear();
+        ui->editV0Y->clear();
+        ui->editV0Z->clear();
+        ui->editPfY->clear();
+        ui->editPfZ->clear();
+        ui->editVfY->clear();
+        ui->editVfZ->clear();
+    } else {
+        ui->VYlineEdit->setText(formatDoubleForInput(limits.velY));
+        ui->VZlineEdit->setText(formatDoubleForInput(limits.velZ));
+        ui->accYlineEdit->setText(formatDoubleForInput(limits.accY));
+        ui->accZlineEdit->setText(formatDoubleForInput(limits.accZ));
+        ui->JYlineEdit->setText(formatDoubleForInput(limits.jerkY));
+        ui->JZlineEdit->setText(formatDoubleForInput(limits.jerkZ));
+        ui->editP0Y->setText(formatDoubleForInput(start.y));
+        ui->editP0Z->setText(formatDoubleForInput(start.z));
+        ui->editV0Y->setText(formatDoubleForInput(start.vy));
+        ui->editV0Z->setText(formatDoubleForInput(start.vz));
+        ui->editPfY->setText(formatDoubleForInput(target.y));
+        ui->editPfZ->setText(formatDoubleForInput(target.z));
+        ui->editVfY->setText(formatDoubleForInput(target.vy));
+        ui->editVfZ->setText(formatDoubleForInput(target.vz));
+    }
+
+    const int syncIndex = ui->syncComboBox->findText(config.syncMode, Qt::MatchContains);
+    if (syncIndex >= 0) {
+        ui->syncComboBox->setCurrentIndex(syncIndex);
+    }
+    ui->cycleLineEdit->setText(formatDoubleForInput(config.deltaT * 1000.0));
+
+    clearAllErrorStates();
+}
+
+QString MainWindow::formatDoubleForInput(double value)
+{
+    QString text = QString::number(value, 'f', 6);
+    while (text.contains(QLatin1Char('.')) && text.endsWith(QLatin1Char('0'))) {
+        text.chop(1);
+    }
+    if (text.endsWith(QLatin1Char('.'))) {
+        text.chop(1);
+    }
+    return text.isEmpty() ? QStringLiteral("0") : text;
+}
+
+void MainWindow::showEvent(QShowEvent *event)
+{
+    QMainWindow::showEvent(event);
+#ifdef Q_OS_WIN
+    static bool done = false;
+    if (!done) {
+        HWND hwnd = reinterpret_cast<HWND>(winId());
+        BOOL dark = TRUE;
+        DwmSetWindowAttribute(hwnd, DWMWA_USE_IMMERSIVE_DARK_MODE, &dark, sizeof(dark));
+        DWORD captionColor = RGB(8, 26, 42);
+        DwmSetWindowAttribute(hwnd, DWMWA_CAPTION_COLOR, &captionColor, sizeof(captionColor));
+        done = true;
+    }
+#endif
 }

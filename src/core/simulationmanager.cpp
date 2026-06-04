@@ -385,8 +385,7 @@ void SimulationManager::updateSimulationState(SimulationState newState)
 // 清理工作线程（保持但可能不再需要）
 void SimulationManager::cleanupWorkerThread()
 {
-    // 此函数现在为空，因为使用QtConcurrent不需要手动管理线程
-    // 保留作为接口，以便将来扩展
+
 }
 
 } // namespace core

@@ -8,6 +8,7 @@
 #include <QHeaderView>
 #include <QBrush>
 #include <QColor>
+#include <QDateTime>
 #include <QTableWidget>
 #include <QTableWidgetItem>
 #include <QDialog>
@@ -390,6 +391,9 @@ bool DataTableWidget::exportToCSV(const QString& filename)
 #else
     stream.setCodec("UTF-8");
 #endif
+
+    stream << QStringLiteral("\"导出时间\",\"%1\"\n\n")
+                  .arg(QDateTime::currentDateTime().toString(QStringLiteral("yyyy-MM-dd HH:mm:ss")));
 
     // 写入表头
     for (int col = 0; col < m_tableWidget->columnCount(); ++col) {

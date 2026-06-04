@@ -51,6 +51,7 @@ find_package(QT NAMES Qt6 Qt5 REQUIRED COMPONENTS Widgets)
 find_package(Qt${QT_VERSION_MAJOR} REQUIRED COMPONENTS
         Widgets
         Core
+        Sql
         Concurrent
         Charts
 )
@@ -72,6 +73,8 @@ set(PROJECT_SOURCES
         src/gui/widgets/TitleBarWidget.h
         src/core/FlightParams.cpp
         src/core/FlightParams.h
+        src/core/FlightConfigRepository.cpp
+        src/core/FlightConfigRepository.h
         src/core/SimulationManager.cpp
         src/core/SimulationManager.h
         src/core/TrajectoryGenerator.cpp
@@ -84,6 +87,8 @@ set(PROJECT_SOURCES
         src/gui/widgets/StatusWidget.h
         src/gui/dialogs/AttitudeDialog.cpp
         src/gui/dialogs/AttitudeDialog.h
+        src/gui/widgets/FlightDisplayWidget.cpp
+        src/gui/widgets/FlightDisplayWidget.h
 )
 
 # 设置包含目录
@@ -111,6 +116,7 @@ endif()
 target_link_libraries(aircraftSystem PRIVATE
         Qt${QT_VERSION_MAJOR}::Widgets
         Qt${QT_VERSION_MAJOR}::Core
+        Qt${QT_VERSION_MAJOR}::Sql
         Qt${QT_VERSION_MAJOR}::Concurrent
         Qt${QT_VERSION_MAJOR}::Charts
 )
@@ -123,7 +129,7 @@ endif()
 
 # Windows上额外链接
 if(WIN32)
-    target_link_libraries(aircraftSystem PRIVATE ws2_32)
+    target_link_libraries(aircraftSystem PRIVATE ws2_32 dwmapi)
 endif()
 
 # 设置目标属性

@@ -1,4 +1,27 @@
-﻿cmake-build-debug/
+﻿# Build outputs
+cmake-build-debug/
 cmake-build-release/
+build-*/
+
+# IDE
 .idea/
+.vs/
+.vscode/
 *.user
+
+# OS junk
+Thumbs.db
+.DS_Store
+Desktop.ini
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# Temp files
+*.tmp
+*.autosave
+*~
+*.swp
+*.bak
