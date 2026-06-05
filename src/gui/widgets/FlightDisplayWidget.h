@@ -58,8 +58,9 @@ private:
 
     // 当前飞机状态
     double m_currentX = 0, m_currentY = 0;
-    double m_currentHeading = 0;  // 航向角（度）
-    bool m_hasData = false;
+    double m_currentHeading = 0;  // 航向角（度），仅 6-DOF 有效
+    int    m_dof = 3;            // 当前轨迹的自由度
+    bool   m_hasData = false;
 
     // 视图变换参数
     double m_scaleX = 1.0, m_scaleY = 1.0;

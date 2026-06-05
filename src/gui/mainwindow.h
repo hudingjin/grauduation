@@ -95,8 +95,8 @@ public:
         FlightDisplayWidget* m_flightDisplay = nullptr;
         QPushButton* m_btnAnimation = nullptr;
         QDialog* m_animationDialog = nullptr;
-        // 创建放大表格
-        QTableWidget* createZoomedTable();
+        // 创建放大表格（返回 QTableView，共享同一个 Model）
+        QTableView* createZoomedTable();
         // 状态标签指针
         StatusWidget* m_statusWidget = nullptr;
         QLabel* m_labelRollValue = nullptr;
@@ -125,6 +125,10 @@ public:
 
         // 工具函数
         bool validateInputs();                         // 检查输入是否为空并标记
+        bool validateParameterLogic(int dof, double cycleTime,
+                                    const core::KinematicLimits& limits,
+                                    const core::StatePoint& start,
+                                    const core::StatePoint& target); // 参数逻辑校验
         static double safeReadDouble(QLineEdit* edit); // 安全读取数值
         void updateStatusMessage(const QString& message, bool isError = false) const;
         void updateUIForDOF(int dof);
@@ -139,7 +143,7 @@ public:
         static QString formatDoubleForInput(double value);
         // 放大表格对话框
         void showZoomedTableDialog();
-        void exportTableToCSV(QTableWidget* table, const QString& filename);
+        void exportTableToCSV(QAbstractItemView* view, const QString& filename);
         QWidget* createWidgetFromLayout(QLayout* layout);
         QString getDisplayNameForField(const QString& chars);
         void clearAllErrorStates() const;

@@ -275,44 +275,47 @@ TrajectoryPoint SimulationManager::getCurrentState(double time) const
         return m_currentTrajectory.points.last();
     }
 
-    // 线性插值查找
-    for (int i = 0; i < m_currentTrajectory.points.size() - 1; ++i) {
-        const auto& p1 = m_currentTrajectory.points[i];
-        const auto& p2 = m_currentTrajectory.points[i + 1];
-
-        if (p1.time <= time && p2.time >= time) {
-            double alpha = (time - p1.time) / (p2.time - p1.time);
-
-            TrajectoryPoint result;
-            result.time = time;
-
-            // 位置线性插值
-            result.x = p1.x + (p2.x - p1.x) * alpha;
-            result.y = p1.y + (p2.y - p1.y) * alpha;
-            result.z = p1.z + (p2.z - p1.z) * alpha;
-
-            // 速度线性插值
-            result.vx = p1.vx + (p2.vx - p1.vx) * alpha;
-            result.vy = p1.vy + (p2.vy - p1.vy) * alpha;
-            result.vz = p1.vz + (p2.vz - p1.vz) * alpha;
-
-            // 加速度线性插值
-            result.ax = p1.ax + (p2.ax - p1.ax) * alpha;
-            result.ay = p1.ay + (p2.ay - p1.ay) * alpha;
-            result.az = p1.az + (p2.az - p1.az) * alpha;
-
-            result.roll = p1.roll + (p2.roll - p1.roll) * alpha;
-            result.pitch = p1.pitch + (p2.pitch - p1.pitch) * alpha;
-            result.yaw = p1.yaw + (p2.yaw - p1.yaw) * alpha;
-            result.rollRate = p1.rollRate + (p2.rollRate - p1.rollRate) * alpha;
-            result.pitchRate = p1.pitchRate + (p2.pitchRate - p1.pitchRate) * alpha;
-            result.yawRate = p1.yawRate + (p2.yawRate - p1.yawRate) * alpha;
-
-            return result;
-        }
+    // 二分查找：数据按时间单调递增，O(log n) 替代 O(n) 线性扫描
+    const auto& pts = m_currentTrajectory.points;
+    int lo = 0, hi = pts.size() - 1;
+    while (lo < hi - 1) {
+        int mid = (lo + hi) / 2;
+        if (pts[mid].time <= time) lo = mid;
+        else                       hi = mid;
     }
+    const auto& p1 = pts[lo];
+    const auto& p2 = pts[hi];
 
-    return m_currentTrajectory.points.last();
+    double seg = p2.time - p1.time;
+    double alpha = (seg > 1e-12) ? (time - p1.time) / seg : 0.0;
+
+    TrajectoryPoint result;
+    result.time = time;
+
+    // 位置
+    result.x = p1.x + (p2.x - p1.x) * alpha;
+    result.y = p1.y + (p2.y - p1.y) * alpha;
+    result.z = p1.z + (p2.z - p1.z) * alpha;
+
+    // 速度
+    result.vx = p1.vx + (p2.vx - p1.vx) * alpha;
+    result.vy = p1.vy + (p2.vy - p1.vy) * alpha;
+    result.vz = p1.vz + (p2.vz - p1.vz) * alpha;
+
+    // 加速度
+    result.ax = p1.ax + (p2.ax - p1.ax) * alpha;
+    result.ay = p1.ay + (p2.ay - p1.ay) * alpha;
+    result.az = p1.az + (p2.az - p1.az) * alpha;
+
+    // 姿态
+    result.roll = p1.roll + (p2.roll - p1.roll) * alpha;
+    result.pitch = p1.pitch + (p2.pitch - p1.pitch) * alpha;
+    result.yaw = p1.yaw + (p2.yaw - p1.yaw) * alpha;
+    result.rollRate = p1.rollRate + (p2.rollRate - p1.rollRate) * alpha;
+    result.pitchRate = p1.pitchRate + (p2.pitchRate - p1.pitchRate) * alpha;
+    result.yawRate = p1.yawRate + (p2.yawRate - p1.yawRate) * alpha;
+
+    return result;
 }
 
 // 获取仿真时间

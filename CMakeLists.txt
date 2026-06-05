@@ -83,6 +83,8 @@ set(PROJECT_SOURCES
         src/gui/widgets/ChartWidget.h
         src/gui/widgets/DataTableWidget.cpp
         src/gui/widgets/DataTableWidget.h
+        src/gui/widgets/TrajectoryTableModel.cpp
+        src/gui/widgets/TrajectoryTableModel.h
         src/gui/widgets/StatusWidget.cpp
         src/gui/widgets/StatusWidget.h
         src/gui/dialogs/AttitudeDialog.cpp

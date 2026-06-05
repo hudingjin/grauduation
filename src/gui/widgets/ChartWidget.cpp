@@ -71,12 +71,9 @@ ChartWidget::ChartWidget(QWidget* container, QObject* parent)
 ChartWidget::~ChartWidget()
 {
     m_chart->removeAllSeries();
-    // removeAllSeries() already deletes all series owned by the chart.
-    // Just null the dangling pointers.
     m_seriesX = nullptr;
     m_seriesY = nullptr;
     m_seriesZ = nullptr;
-
     // 注意：m_chartView 会在 m_container 销毁时自动清理
     // 但m_chart是m_chartView的子对象，也会被自动清理
 
@@ -214,6 +211,8 @@ void ChartWidget::updateCurrentTime(double time)
 
     m_chart->scene()->addItem(m_timeIndicator);
 }
+
+
 void ChartWidget::setAxisLabels(const QString& xLabel, const QString& yLabel) const{
     m_axisX->setTitleText(xLabel);
     m_axisY->setTitleText(yLabel);
@@ -289,18 +288,13 @@ QVector<QPointF> ChartWidget::downsampleData(const QVector<QPointF>& data, int m
 
     return result;
 }
-/// ChartWidget.cpp - 在setData函数后添加
+//清空旧数据，根据DOF（1/3/6）创建相应数量的曲线系列，计算坐标轴范围
 void ChartWidget::setDataForDOF(const QVector<QPointF>& xData,
                                const QVector<QPointF>& yData,
                                const QVector<QPointF>& zData,
                                int dof)
 {
-    // ✅ 修复1：添加详细的调试输出
-    qDebug() << "[ChartWidget] setDataForDOF 被调用";
-    qDebug() << "  DOF =" << dof;
-    qDebug() << "  xData大小:" << xData.size();
-    qDebug() << "  yData大小:" << yData.size();
-    qDebug() << "  zData大小:" << zData.size();
+
 
     if (!xData.isEmpty()) {
         qDebug() << "  第一个点: t=" << xData.first().x() << ", y=" << xData.first().y();
@@ -324,8 +318,6 @@ void ChartWidget::setDataForDOF(const QVector<QPointF>& xData,
     }
     m_chart->removeAllSeries();
     // 2. 清理现有系列对象（避免内存泄漏）
-    // removeAllSeries() above already deleted the old series.
-    // Null pointers so we don't touch freed memory.
     m_seriesX = nullptr;
     m_seriesY = nullptr;
     m_seriesZ = nullptr;
@@ -381,10 +373,10 @@ void ChartWidget::setDataForDOF(const QVector<QPointF>& xData,
         m_seriesZ->attachAxis(m_axisY);
     }
 
-    // 8. ✅ 修复2：正确的数据范围计算
+    // 8.正确的数据范围计算
     if (!xData.isEmpty()) {
-        m_xMin = xData.first().x();
-        m_xMax = xData.last().x();
+        m_xMin = xData.first().x(); // X最小值 = 第一个点的x坐标（时间）
+        m_xMax = xData.last().x();// X最大值 = 最后一个点的x坐标
 
         // 如果只有一个点或所有点时间相同，设置合理的X范围
         if (qAbs(m_xMax - m_xMin) < 1e-6) {
@@ -423,7 +415,7 @@ void ChartWidget::setDataForDOF(const QVector<QPointF>& xData,
 
         qDebug() << "  Y轴原始范围: min=" << m_yMin << ", max=" << m_yMax;
 
-        // ✅ 修复3：正确处理Y轴范围
+        // ：正确处理Y轴范围
         if (qAbs(m_yMax - m_yMin) < 1e-6) {
             // 如果所有Y值都一样，设置一个合理的范围
             qDebug() << "  [警告] 所有Y值相同，扩展Y范围";
@@ -445,7 +437,7 @@ void ChartWidget::setDataForDOF(const QVector<QPointF>& xData,
         m_yMax = 1.0;
     }
 
-    // 9. ✅ 修复4：安全的坐标轴范围设置
+    // 9安全的坐标轴范围设置
     try {
         m_axisX->setRange(m_xMin, m_xMax);
         m_axisY->setRange(m_yMin, m_yMax);
@@ -458,7 +450,7 @@ void ChartWidget::setDataForDOF(const QVector<QPointF>& xData,
     }
 
     // 10. 更新图例
-    // ??? UI ????????????????
+    //
     m_chart->legend()->setVisible(false);
 
     qDebug() << "[ChartWidget] setDataForDOF 完成，显示系列:"
@@ -466,9 +458,9 @@ void ChartWidget::setDataForDOF(const QVector<QPointF>& xData,
              << (m_seriesY ? "Y" : "")
              << (m_seriesZ ? "Z" : "");
 }
-// ==================== dong tai hui tu ====================
+// ==================== 动态绘图 ====================
 
-
+//[创建幽灵系列 + 空动态系列]
 void ChartWidget::setupDynamicMode(const QVector<QPointF>& xData,
                                     const QVector<QPointF>& yData,
                                     const QVector<QPointF>& zData,
@@ -520,6 +512,9 @@ void ChartWidget::setupDynamicMode(const QVector<QPointF>& xData,
     }
     m_chart->legend()->setVisible(false);
 }
+
+
+//动态绘图
 
 void ChartWidget::appendDynamicPoint(const QPointF& xPt,
                                       const QPointF& yPt,

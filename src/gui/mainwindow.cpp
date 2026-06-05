@@ -28,6 +28,7 @@
 #include <QtConcurrent/QtConcurrent>
 #include <QMessageBox>
 #include <cmath>
+#include <QTableView>
 #include <QTableWidget>
 #include <QToolBar>
 #include <QAction>
@@ -145,24 +146,6 @@ MainWindow::~MainWindow()
     }
     delete ui;
 }
-
-// 初始化状态态显示区
-// void MainWindow::initStatusDisplay()
-// {
-//     // 动创建控
-//     m_progressBar = new QProgressBar(this);
-//     m_progressBar->setRange(0, 1000);
-//     m_progressBar->setValue(0);
-
-//     m_statusLabel = new QLabel("就绪", this);
-
-//     // 添加到状态态栏
-//     QStatusBar* statusBar = this->statusBar();
-//     if (statusBar) {
-//         statusBar->addPermanentWidget(m_progressBar);
-//         statusBar->addPermanentWidget(m_statusLabel);
-//     }
-// }
 
 // 初始化控制面
 void MainWindow::initControlPanel()
@@ -581,17 +564,24 @@ double MainWindow::safeReadDouble(QLineEdit* edit)
     // 读取控制周期
     double cycleTime = ui->cycleLineEdit->text().toDouble();
 
-    // 添加输入验证证
+    // 输入验证：控制周期单位为 ms，合理范围 0.1 ~ 1000
     if (cycleTime <= 0) {
-        QMessageBox::warning(this, "参数错误", "控制周期必须大于0");
+        QMessageBox::warning(this, QStringLiteral("参数错误"),
+                             QStringLiteral("控制周期必须大于 0"));
+        ui->btnGenerate->setEnabled(true);
         return;
     }
-    if (cycleTime > 1000) {  // 如果大于1000，单位错
-        QMessageBox::warning(this, "参数错误", "控制周期单位应为毫秒(ms)，请确认输入");
+    if (cycleTime > 1000) {
+        QMessageBox::warning(this, QStringLiteral("参数错误"),
+                             QStringLiteral("控制周期过大（当前 %1 ms），请设置在 0.1 ~ 1000 ms 范围内")
+                                 .arg(cycleTime, 0, 'f', 1));
+        ui->btnGenerate->setEnabled(true);
         return;
     }
-    if (cycleTime < 0.1) {  // 如果小于0.1毫秒，可能太
-        QMessageBox::warning(this, "参数警告", "控制周期过小，可能导致计算不稳定");
+    if (cycleTime < 0.1) {
+        QMessageBox::warning(this, QStringLiteral("参数警告"),
+                             QStringLiteral("控制周期过小（当前 %1 ms），可能导致轨迹点数过多、计算变慢")
+                                 .arg(cycleTime, 0, 'f', 3));
         ui->btnGenerate->setEnabled(true);
         return;
     }
@@ -628,7 +618,14 @@ double MainWindow::safeReadDouble(QLineEdit* edit)
     target.vy = safeReadDouble(ui->editVfY);
     target.vz = safeReadDouble(ui->editVfZ);
     // ------------------------------------------------
-    // 4. 更新核心数据对象
+    // 4. 参数逻辑校验（检查数值的合理性，不仅仅是空值）
+    // ------------------------------------------------
+    if (!validateParameterLogic(config.dof, cycleTime, limits, start, target)) {
+        ui->btnGenerate->setEnabled(true);
+        return;  // validateParameterLogic 内部已经弹出具体提示
+    }
+    // ------------------------------------------------
+    // 5. 更新核心数据对象
     // ------------------------------------------------
     m_flightParams.setConfig(config);
     m_flightParams.setLimits(limits);
@@ -787,7 +784,6 @@ void MainWindow::on_btnExport_clicked(){
 
 void MainWindow::onTrajectoryGenerated(const core::TrajectoryResult& result)
 {
-    // Keep Generate disabled after a successful trajectory; Reset enables it again.
     ui->btnGenerate->setEnabled(!result.success);
 
     if (result.success) {
@@ -805,24 +801,9 @@ void MainWindow::onTrajectoryGenerated(const core::TrajectoryResult& result)
                 .arg(result.duration, 0, 'f', 2), false);
         }
 
-        // 调试输出轨迹信息
-        qDebug() << "轨迹信息:";
-        qDebug() << "  点数:" << result.points.size();
-        qDebug() << "  时长:" << result.duration << "s";
-        if (!result.points.isEmpty()) {
-            qDebug() << "  起始 t=" << result.points.first().time
-                     << ", pos=(" << result.points.first().x
-                     << "," << result.points.first().y
-                     << "," << result.points.first().z << ")";
-            qDebug() << "  结束 t=" << result.points.last().time
-                     << ", pos=(" << result.points.last().x
-                     << "," << result.points.last().y
-                     << "," << result.points.last().z << ")";
-        }
-
         //更新StatusWidget
         if (m_statusWidget) {
-            // 更新状态显
+            // 更新状态
             m_statusWidget->updateStatus("轨迹生成成功");
             m_statusWidget->updateRuckigStatus("成功");
 
@@ -912,7 +893,6 @@ void MainWindow::onSimulationTimeUpdated(double time)
 void MainWindow::onRealtimeStateUpdated(const core::TrajectoryPoint& state)
 {
     // 实时更新图表指示
-    // dong tai hui tu: zhui jia shi shi shu ju dian
     int dof = m_currentDOF;
     if (m_positionChart) {
         m_positionChart->appendDynamicPoint(
@@ -1041,45 +1021,66 @@ void MainWindow::initCharts()
 void MainWindow::updateChartsWithTrajectory(const core::TrajectoryResult& result)
 {
     int dof = m_dofGroup ? m_dofGroup->checkedId() : 3;
-    qDebug() << "更新图表，DOF =" << dof << "，轨迹点=" << result.points.size();
+    const int totalPts = result.points.size();
+    qDebug() << "更新图表，DOF =" << dof << "，轨迹点=" << totalPts;
+
+    // 降采样到 2000 个点以内，图表渲染从秒级降到毫秒级。
+    constexpr int MAX_CHART_POINTS = 2000;
+    const int stride = qMax(1, totalPts / MAX_CHART_POINTS);
+    const int estimatedSize = totalPts / stride + 1;
 
     if (m_positionChart) {
-        // 位置图数
-        QVector<QPointF> posX, posY, posZ;
-        for (const auto& point : result.points) {
-            posX.append(QPointF(point.time, point.x));
-            if (dof >= 3) {
-                posY.append(QPointF(point.time, point.y));
-                posZ.append(QPointF(point.time, point.z));
-            }
+        QVector<QPointF> posX, posY, posZ;// 准备数据：把所有轨迹点转换成 QVector<QPointF>
+        posX.reserve(estimatedSize);
+        if (dof >= 3) { posY.reserve(estimatedSize); posZ.reserve(estimatedSize); }
+        for (int i = 0; i < totalPts; i += stride) {
+            const auto& p = result.points[i];
+            posX.append(QPointF(p.time, p.x));
+            if (dof >= 3) { posY.append(QPointF(p.time, p.y)); posZ.append(QPointF(p.time, p.z)); }
+        }
+        // 确保最后一个点被包含
+        if ((totalPts - 1) % stride != 0) {
+            const auto& p = result.points.last();
+            posX.append(QPointF(p.time, p.x));
+            if (dof >= 3) { posY.append(QPointF(p.time, p.y)); posZ.append(QPointF(p.time, p.z)); }
         }
         m_positionChart->setDataForDOF(posX, posY, posZ, dof);
         m_positionChart->setupDynamicMode(posX, posY, posZ, dof);
     }
 
     if (m_velocityChart) {
-        // 速度图数
         QVector<QPointF> velX, velY, velZ;
-        for (const auto& point : result.points) {
-            velX.append(QPointF(point.time, point.vx));
-            if (dof >= 3) {
-                velY.append(QPointF(point.time, point.vy));
-                velZ.append(QPointF(point.time, point.vz));
-            }
+        velX.reserve(estimatedSize);
+        if (dof >= 3) { velY.reserve(estimatedSize); velZ.reserve(estimatedSize); }
+        for (int i = 0; i < totalPts; i += stride) {
+            const auto& p = result.points[i];
+            velX.append(QPointF(p.time, p.vx));
+            if (dof >= 3) { velY.append(QPointF(p.time, p.vy)); velZ.append(QPointF(p.time, p.vz)); }
+        }
+        if ((totalPts - 1) % stride != 0) {
+            const auto& p = result.points.last();
+            velX.append(QPointF(p.time, p.vx));
+            if (dof >= 3) { velY.append(QPointF(p.time, p.vy)); velZ.append(QPointF(p.time, p.vz)); }
         }
         m_velocityChart->setDataForDOF(velX, velY, velZ, dof);
         m_velocityChart->setupDynamicMode(velX, velY, velZ, dof);
     }
 
     if (m_accelerationChart) {
-        // 加度图数
         QVector<QPointF> accX, accY, jerk;
-        for (const auto& point : result.points) {
-            accX.append(QPointF(point.time, point.ax));
-            if (dof >= 3) {
-                accY.append(QPointF(point.time, point.ay));
-            }
-            jerk.append(QPointF(point.time, 0)); // 加加速度占位
+        accX.reserve(estimatedSize); jerk.reserve(estimatedSize);
+        if (dof >= 3) accY.reserve(estimatedSize);
+        for (int i = 0; i < totalPts; i += stride) {
+            const auto& p = result.points[i];
+            accX.append(QPointF(p.time, p.ax));
+            if (dof >= 3) accY.append(QPointF(p.time, p.ay));
+            jerk.append(QPointF(p.time, 0));
+        }
+        if ((totalPts - 1) % stride != 0) {
+            const auto& p = result.points.last();
+            accX.append(QPointF(p.time, p.ax));
+            if (dof >= 3) accY.append(QPointF(p.time, p.ay));
+            jerk.append(QPointF(p.time, 0));
         }
         m_accelerationChart->setDataForDOF(accX, accY, jerk, dof);
         m_accelerationChart->setupDynamicMode(accX, accY, jerk, dof);
@@ -1087,17 +1088,27 @@ void MainWindow::updateChartsWithTrajectory(const core::TrajectoryResult& result
 
     if (m_attitudeChart && dof == 6) {
         QVector<QPointF> roll, pitch, yaw;
-        for (const auto& point : result.points) {
-            roll.append(QPointF(point.time, point.roll));
-            pitch.append(QPointF(point.time, point.pitch));
-            yaw.append(QPointF(point.time, point.yaw));
+        roll.reserve(estimatedSize); pitch.reserve(estimatedSize); yaw.reserve(estimatedSize);
+        for (int i = 0; i < totalPts; i += stride) {
+            const auto& p = result.points[i];
+            roll.append(QPointF(p.time, p.roll));
+            pitch.append(QPointF(p.time, p.pitch));
+            yaw.append(QPointF(p.time, p.yaw));
+        }
+        if ((totalPts - 1) % stride != 0) {
+            const auto& p = result.points.last();
+            roll.append(QPointF(p.time, p.roll));
+            pitch.append(QPointF(p.time, p.pitch));
+            yaw.append(QPointF(p.time, p.yaw));
         }
         m_attitudeChart->setDataForDOF(roll, pitch, yaw, dof);
         m_attitudeChart->setupDynamicMode(roll, pitch, yaw, dof);
     } else if (m_attitudeChart) {
-        // 3-DOF/1-DOF无真实姿态数据，清空图表
         m_attitudeChart->clear();
-    }}
+    }
+
+    qDebug() << "图表降采样完成:" << totalPts << "→ ~" << estimatedSize << "个点/系列";
+}
 
 void MainWindow::setupTableControls()
 {
@@ -1284,9 +1295,7 @@ void MainWindow::on_btnAnimation_clicked()
     // 创建对话框
     QDialog* dlg = new QDialog(this, Qt::Window);
     dlg->setWindowTitle(QString::fromUtf8("✈ 飞行轨迹俯视动画"));
-    dlg->resize(640, 540);
-    dlg->setMinimumSize(400, 300);
-    dlg->setWindowFlags(Qt::Window | Qt::WindowCloseButtonHint);
+    dlg->setFixedSize(640, 540);
     dlg->setStyleSheet(QStringLiteral("QDialog { background-color: #061424; }"));
 
     auto* mainLayout = new QVBoxLayout(dlg);
@@ -1394,7 +1403,7 @@ void MainWindow::showZoomedTableDialog()
                 fileName += ".csv";
             }
 
-            QTableWidget* table = zoomDialog->findChild<QTableWidget*>("zoomedTable");
+            QTableView* table = zoomDialog->findChild<QTableView*>("zoomedTable");
             if (table) {
                 exportTableToCSV(table, fileName);
             }
@@ -1417,8 +1426,8 @@ void MainWindow::showZoomedTableDialog()
     statusBar->addPermanentWidget(statusLabel);
     mainLayout->addWidget(statusBar);
 
-    // 3. 创建放大的表
-    QTableWidget* zoomedTable = createZoomedTable();
+    // 3. 创建放大的表（共享同一个 Model，不复制数据）
+    QTableView* zoomedTable = createZoomedTable();
     zoomedTable->setObjectName("zoomedTable");
     mainLayout->addWidget(zoomedTable);
 
@@ -1454,75 +1463,51 @@ void MainWindow::showZoomedTableDialog()
     zoomDialog->exec();
 }
 
-QTableWidget* MainWindow::createZoomedTable()
+QTableView* MainWindow::createZoomedTable()
 {
+    // 创建一个新的 QTableView，共享同一个 Model（零拷贝）
+    auto* zoomedTable = new QTableView();
+
     if (!m_dataTable || !m_dataTable->getRowCount()) {
-        return new QTableWidget();
+        return zoomedTable;
     }
 
-    // 获取原始表格
-    QTableWidget* originalTable = ui->tableTrajectory;
-    if (!originalTable) {
-        return new QTableWidget();
-    }
+    // 共享同一个 Model —— 不需要复制数据！
+    TrajectoryTableModel* sharedModel = m_dataTable->model();
+    zoomedTable->setModel(sharedModel);
 
-    // 创建放大表格
-    QTableWidget* zoomedTable = new QTableWidget();
-
-    // 复制表头
-    int columnCount = originalTable->columnCount();
-    int rowCount = originalTable->rowCount();
-
-    zoomedTable->setColumnCount(columnCount);
-    zoomedTable->setRowCount(rowCount);
-
-    // 复制表头文本
-    for (int col = 0; col < columnCount; ++col) {
-        QTableWidgetItem* headerItem = originalTable->horizontalHeaderItem(col);
-        if (headerItem) {
-            zoomedTable->setHorizontalHeaderItem(col, headerItem->clone());
-        }
-    }
-
-    // 复制数据
-    for (int row = 0; row < rowCount; ++row) {
-        for (int col = 0; col < columnCount; ++col) {
-            QTableWidgetItem* item = originalTable->item(row, col);
-            if (item) {
-                zoomedTable->setItem(row, col, item->clone());
-            }
-        }
-    }
-
-    // 设置表格属
+    // 设置表格属性
     zoomedTable->setEditTriggers(QAbstractItemView::NoEditTriggers);
     zoomedTable->setSelectionBehavior(QAbstractItemView::SelectRows);
     zoomedTable->setSelectionMode(QAbstractItemView::SingleSelection);
     zoomedTable->setAlternatingRowColors(true);
-    zoomedTable->setSortingEnabled(true);
+    zoomedTable->setSortingEnabled(false);
+    zoomedTable->setShowGrid(true);
 
-    // 设置字体
-    QFont tableFont("Consolas", 10);
+    // 字体
+    QFont tableFont(QStringLiteral("Consolas"), 10);
     zoomedTable->setFont(tableFont);
 
-    // 设置列宽
-    for (int col = 0; col < columnCount; ++col) {
-        zoomedTable->setColumnWidth(col, 120);
+    // 列宽
+    int visCols = sharedModel->visibleColumnCount();
+    for (int sec = 0; sec < visCols; ++sec) {
+        zoomedTable->setColumnWidth(sec, 120);
     }
 
-    // 设置样式
-    zoomedTable->setStyleSheet(
-        "QTableWidget {"
+    // 样式
+    zoomedTable->setStyleSheet(QStringLiteral(
+        "QTableView {"
         "   background-color: #041f3c;"
         "   color: #7aa8cc;"
         "   gridline-color: #0d3a5c;"
         "   border: 1px solid #0d3a5c;"
         "   font-family: 'Consolas', 'Courier New', monospace;"
+        "   alternate-background-color: #082a4a;"
         "}"
-        "QTableWidget::item {"
+        "QTableView::item {"
         "   padding: 4px;"
         "}"
-        "QTableWidget::item:selected {"
+        "QTableView::item:selected {"
         "   background-color: #0d3a5c;"
         "   color: #ffffff;"
         "}"
@@ -1552,38 +1537,41 @@ QTableWidget* MainWindow::createZoomedTable()
         "   background: #1a5b8c;"
         "   border-radius: 8px;"
         "}"
-        );
+    ));
 
-    // 设置表头
-    QFont headerFont("Segoe UI", 10, QFont::Bold);
+    // 表头
+    QFont headerFont(QStringLiteral("Segoe UI"), 10, QFont::Bold);
     zoomedTable->horizontalHeader()->setFont(headerFont);
     zoomedTable->horizontalHeader()->setStretchLastSection(true);
     zoomedTable->horizontalHeader()->setSectionResizeMode(QHeaderView::Interactive);
 
-    // 设置垂直表头
+    // 行高
     zoomedTable->verticalHeader()->setDefaultSectionSize(24);
     zoomedTable->verticalHeader()->setFont(tableFont);
 
-    qDebug() << "Created zoomed table:" << columnCount << "columns," << rowCount << "rows";
+    qDebug() << "Created zoomed table (shared model):"
+             << sharedModel->visibleColumnCount() << "columns,"
+             << sharedModel->rowCount() << "rows (zero-copy)";
     return zoomedTable;
 }
 
-void MainWindow::exportTableToCSV(QTableWidget* table, const QString& filename)
+void MainWindow::exportTableToCSV(QAbstractItemView* view, const QString& filename)
 {
-    if (!table || table->rowCount() == 0) {
-        QMessageBox::warning(this, "导出错误", "没有可导出的表格数据");
+    QAbstractItemModel* model = view->model();
+    if (!model || model->rowCount() == 0) {
+        QMessageBox::warning(this, QStringLiteral("导出错误"),
+                             QStringLiteral("没有可导出的表格数据"));
         return;
     }
 
     QFile file(filename);
     if (!file.open(QIODevice::WriteOnly | QIODevice::Text)) {
-        QMessageBox::critical(this, "导出错误", "无法创建文件: " + filename);
+        QMessageBox::critical(this, QStringLiteral("导出错误"),
+                              QStringLiteral("无法创建文件: ") + filename);
         return;
     }
 
     QTextStream stream(&file);
-
-    // Qt6兼容
 #if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
     stream.setEncoding(QStringConverter::Utf8);
 #else
@@ -1593,38 +1581,31 @@ void MainWindow::exportTableToCSV(QTableWidget* table, const QString& filename)
     stream << QStringLiteral("\"导出时间\",\"%1\"\n\n")
                   .arg(QDateTime::currentDateTime().toString(QStringLiteral("yyyy-MM-dd HH:mm:ss")));
 
-    // 写入表头
-    for (int col = 0; col < table->columnCount(); ++col) {
-        QTableWidgetItem* headerItem = table->horizontalHeaderItem(col);
-        if (headerItem) {
-            stream << "\"" << headerItem->text() << "\"";
-        }
-        if (col < table->columnCount() - 1) {
-            stream << ",";
-        }
+    // 写表头
+    int cols = model->columnCount();
+    for (int col = 0; col < cols; ++col) {
+        stream << QStringLiteral("\"%1\"")
+                      .arg(model->headerData(col, Qt::Horizontal, Qt::DisplayRole).toString());
+        if (col < cols - 1) stream << ",";
     }
     stream << "\n";
 
-    // 写入数据
-    for (int row = 0; row < table->rowCount(); ++row) {
-        for (int col = 0; col < table->columnCount(); ++col) {
-            QTableWidgetItem* item = table->item(row, col);
-            if (item) {
-                stream << "\"" << item->text() << "\"";
-            }
-            if (col < table->columnCount() - 1) {
-                stream << ",";
-            }
+    // 写数据行
+    int rows = model->rowCount();
+    for (int row = 0; row < rows; ++row) {
+        for (int col = 0; col < cols; ++col) {
+            stream << QStringLiteral("\"%1\"")
+                          .arg(model->index(row, col).data(Qt::DisplayRole).toString());
+            if (col < cols - 1) stream << ",";
         }
         stream << "\n";
     }
 
     file.close();
 
-    QMessageBox::information(this, "导出成功",
-                             QString("数据已导出到：\n%1\n\n行数：%2")
-                                 .arg(filename)
-                                 .arg(table->rowCount()));
+    QMessageBox::information(this, QStringLiteral("导出成功"),
+                             QStringLiteral("数据已导出到：\n%1\n\n行数：%2")
+                                 .arg(filename).arg(rows));
 }
 void MainWindow::initStatusWidget()
 {
@@ -2053,6 +2034,144 @@ void MainWindow::setDefaultValuesForDOF(int dof)
 }
 
 // 6. DOF特定的输入验证证函
+// =====================================================================
+// 参数逻辑校验 —— 在空值检查通过后调用，校验所有参数的数值合理性
+// 返回 true 表示全部通过，false 表示有问题（已弹出具体提示）
+// =====================================================================
+bool MainWindow::validateParameterLogic(int dof, double /*cycleTime*/,
+                                        const core::KinematicLimits& limits,
+                                        const core::StatePoint& start,
+                                        const core::StatePoint& target)
+{
+    // ── 1. 运动学约束必须为正 ──
+    auto checkPositive = [&](double value, const QString& name) -> bool {
+        if (value <= 0.0) {
+            QMessageBox::warning(this, QStringLiteral("参数错误"),
+                QStringLiteral("%1 必须大于 0（当前值：%2）").arg(name).arg(value));
+            return false;
+        }
+        return true;
+    };
+
+    // X 轴约束
+    if (!checkPositive(limits.velX,  QStringLiteral("最大速度 Vx")))  return false;
+    if (!checkPositive(limits.accX,  QStringLiteral("最大加速度 Ax"))) return false;
+    if (!checkPositive(limits.jerkX, QStringLiteral("最大加加速度 Jx"))) return false;
+
+    if (dof >= 3) {
+        if (!checkPositive(limits.velY,  QStringLiteral("最大速度 Vy")))  return false;
+        if (!checkPositive(limits.velZ,  QStringLiteral("最大速度 Vz")))  return false;
+        if (!checkPositive(limits.accY,  QStringLiteral("最大加速度 Ay"))) return false;
+        if (!checkPositive(limits.accZ,  QStringLiteral("最大加速度 Az"))) return false;
+        if (!checkPositive(limits.jerkY, QStringLiteral("最大加加速度 Jy"))) return false;
+        if (!checkPositive(limits.jerkZ, QStringLiteral("最大加加速度 Jz"))) return false;
+    }
+
+    // 6-DOF 角运动约束
+    if (dof == 6) {
+        const auto& att = m_attitudeParams;
+        if (!checkPositive(att.maxRollVel,  QStringLiteral("最大 Roll 角速度")))  return false;
+        if (!checkPositive(att.maxPitchVel, QStringLiteral("最大 Pitch 角速度"))) return false;
+        if (!checkPositive(att.maxYawVel,   QStringLiteral("最大 Yaw 角速度")))   return false;
+        if (!checkPositive(att.maxRollAcc,  QStringLiteral("最大 Roll 角加速度"))) return false;
+        if (!checkPositive(att.maxPitchAcc, QStringLiteral("最大 Pitch 角加速度"))) return false;
+        if (!checkPositive(att.maxYawAcc,   QStringLiteral("最大 Yaw 角加速度"))) return false;
+        if (!checkPositive(att.maxRollJerk,  QStringLiteral("最大 Roll 角加加速度"))) return false;
+        if (!checkPositive(att.maxPitchJerk, QStringLiteral("最大 Pitch 角加加速度"))) return false;
+        if (!checkPositive(att.maxYawJerk,   QStringLiteral("最大 Yaw 角加加速度"))) return false;
+    }
+
+    // ── 2. 起始速度不能超过对应轴的约束 ──
+    auto checkSpeedLimit = [&](double speed, double maxVel, const QString& axis,
+                                const QString& which) -> bool {
+        if (std::abs(speed) > maxVel + 0.001) {
+            QMessageBox::warning(this, QStringLiteral("参数错误"),
+                QStringLiteral("%1速度 %2（%3）超过了该轴的最大速度限制（%4）\n\n"
+                               "请降低 %1速度，或增大对应轴的速度约束。")
+                    .arg(which).arg(axis).arg(std::abs(speed), 0, 'f', 2).arg(maxVel));
+            return false;
+        }
+        return true;
+    };
+
+    if (!checkSpeedLimit(start.vx,  limits.velX, QStringLiteral("Vx"), QStringLiteral("起始"))) return false;
+    if (!checkSpeedLimit(target.vx, limits.velX, QStringLiteral("Vx"), QStringLiteral("目标"))) return false;
+    if (dof >= 3) {
+        if (!checkSpeedLimit(start.vy,  limits.velY, QStringLiteral("Vy"), QStringLiteral("起始"))) return false;
+        if (!checkSpeedLimit(start.vz,  limits.velZ, QStringLiteral("Vz"), QStringLiteral("起始"))) return false;
+        if (!checkSpeedLimit(target.vy, limits.velY, QStringLiteral("Vy"), QStringLiteral("目标"))) return false;
+        if (!checkSpeedLimit(target.vz, limits.velZ, QStringLiteral("Vz"), QStringLiteral("目标"))) return false;
+    }
+
+    // ── 3. 起始与目标位置不能重合 ──
+    {
+        double dx = target.x - start.x;
+        double dy = (dof >= 3) ? (target.y - start.y) : 0.0;
+        double dz = (dof >= 3) ? (target.z - start.z) : 0.0;
+        double dist = std::sqrt(dx*dx + dy*dy + dz*dz);
+
+        if (dist < 0.1) {
+            QMessageBox::warning(this, QStringLiteral("参数错误"),
+                QStringLiteral("起始位置与目标位置过于接近（距离仅 %1 m）\n\n"
+                               "两点距离至少需要 0.1 m，Ruckig 才能生成有效的轨迹。")
+                    .arg(dist, 0, 'f', 3));
+            return false;
+        }
+    }
+
+    // ── 4. 速度方向与位移方向逻辑一致性检查 ──
+    // 如果一个轴的目标速度是 0，不做检查（允许让 Ruckig 自然停止）
+    // 如果一个轴的目标速度非零，则其方向应与位移方向一致
+    auto checkDirConsistency = [&](double delta, double tgtVel, const QString& axis) -> bool {
+        if (std::abs(tgtVel) < 0.001) return true;  // 目标速度为 0，跳过
+        if (std::abs(delta) < 0.05)   return true;  // 位移太小，跳过
+        if (delta > 0 && tgtVel < 0) {
+            QMessageBox::warning(this, QStringLiteral("参数矛盾"),
+                QStringLiteral("%1 轴：目标位置在正方向（位移 +%2 m），"
+                               "但目标速度为负值（%3 m/s）\n\n"
+                               "位移方向与速度方向矛盾，Ruckig 无法求解。")
+                    .arg(axis).arg(delta, 0, 'f', 2).arg(tgtVel, 0, 'f', 2));
+            return false;
+        }
+        if (delta < 0 && tgtVel > 0) {
+            QMessageBox::warning(this, QStringLiteral("参数矛盾"),
+                QStringLiteral("%1 轴：目标位置在负方向（位移 %2 m），"
+                               "但目标速度为正值（+%3 m/s）\n\n"
+                               "位移方向与速度方向矛盾，Ruckig 无法求解。")
+                    .arg(axis).arg(delta, 0, 'f', 2).arg(tgtVel, 0, 'f', 2));
+            return false;
+        }
+        return true;
+    };
+
+    double dx = target.x - start.x;
+    if (!checkDirConsistency(dx, target.vx, QStringLiteral("X"))) return false;
+    if (dof >= 3) {
+        double dy = target.y - start.y;
+        double dz = target.z - start.z;
+        if (!checkDirConsistency(dy, target.vy, QStringLiteral("Y"))) return false;
+        if (!checkDirConsistency(dz, target.vz, QStringLiteral("Z"))) return false;
+    }
+
+    // ── 5. 加速度约束下限检查（太小 Ruckig 会失败）──
+    if (dof >= 3) {
+        double maxAcc = std::sqrt(limits.accX*limits.accX +
+                                  limits.accY*limits.accY +
+                                  limits.accZ*limits.accZ);
+        if (maxAcc < 0.1) {
+            QMessageBox::warning(this, QStringLiteral("参数错误"),
+                QStringLiteral("最大加速度约束过小（合加速度仅 %1 m/s²）\n\n"
+                               "加速度约束至少需要 0.1 m/s²，否则 Ruckig 无法在合理时间内完成计算。")
+                    .arg(maxAcc, 0, 'f', 2));
+            return false;
+        }
+    }
+
+    // ── 全部通过 ──
+    qDebug() << "参数逻辑校验全部通过";
+    return true;
+}
+
 bool MainWindow::validate1DOFInputs()
 {
     bool valid = true;

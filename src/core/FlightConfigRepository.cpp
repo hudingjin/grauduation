@@ -44,6 +44,7 @@ QString FlightConfigRepository::lastError() const
     return m_lastError;
 }
 
+    //加载历史摘要
 QList<FlightConfigSummary> FlightConfigRepository::loadSummaries() const
 {
     QList<FlightConfigSummary> summaries;
@@ -74,6 +75,7 @@ QList<FlightConfigSummary> FlightConfigRepository::loadSummaries() const
     return summaries;
 }
 
+    //加载完整配置
 bool FlightConfigRepository::loadConfig(int id, FlightParams* params) const
 {
     if (!params) {

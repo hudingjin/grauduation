@@ -18,14 +18,13 @@ void FlightDisplayWidget::setTrajectoryData(const core::TrajectoryResult& result
 {
     if (result.points.isEmpty()) return;
 
-    // 计算世界坐标范围
+    const int totalPts = result.points.size();
+
+    // 计算世界坐标范围（遍历全部点，这是必须的 O(n) 操作）
     m_worldBounds.xMin = std::numeric_limits<double>::max();
     m_worldBounds.xMax = std::numeric_limits<double>::lowest();
     m_worldBounds.yMin = std::numeric_limits<double>::max();
     m_worldBounds.yMax = std::numeric_limits<double>::lowest();
-
-    m_trajectoryPath.clear();
-    m_trajectoryPath.reserve(result.points.size());
 
     for (const auto& p : result.points) {
         m_worldBounds.xMin = qMin(m_worldBounds.xMin, p.x);
@@ -46,14 +45,25 @@ void FlightDisplayWidget::setTrajectoryData(const core::TrajectoryResult& result
 
     updateViewTransform();
 
-    // 预计算参考轨迹的屏幕坐标
-    for (const auto& p : result.points) {
-        m_trajectoryPath.append(worldToScreen(p.x, p.y));
+    // 预计算参考轨迹的屏幕坐标 —— 降采样到 ~2000 个点
+    // 再多在屏幕上也只是重叠在相同像素上，浪费 CPU
+    constexpr int MAX_PATH_POINTS = 2000;
+    const int stride = qMax(1, totalPts / MAX_PATH_POINTS);
+    m_trajectoryPath.clear();
+    m_trajectoryPath.reserve(totalPts / stride + 2);
+
+    for (int i = 0; i < totalPts; i += stride) {
+        m_trajectoryPath.append(worldToScreen(result.points[i].x, result.points[i].y));
+    }
+    // 确保终点包含
+    if ((totalPts - 1) % stride != 0) {
+        m_trajectoryPath.append(worldToScreen(result.points.last().x, result.points.last().y));
     }
 
-    // 保存原始轨迹数据用于时间查找
+    // 保存原始轨迹数据用于仿真时的精确时间查找（二分查找 O(log n)，不需要降采样）
     m_trajectoryPoints = result.points;
     m_totalDuration = result.duration;
+    m_dof = result.dof;             // 记录 DOF，3-DOF 不显示航向角
 
     m_flownPath.clear();
     m_currentHeading = 0;
@@ -115,13 +125,12 @@ void FlightDisplayWidget::updateAircraftState(const core::TrajectoryPoint& state
     m_currentX = state.x;
     m_currentY = state.y;
 
-    // 从速度方向计算航向角（3-DOF/6-DOF通用）
-    if (qAbs(state.vx) > 1e-6 || qAbs(state.vy) > 1e-6) {
-        m_currentHeading = qRadiansToDegrees(atan2(state.vy, state.vx));
-    }
-    // 6-DOF模式下优先使用Ruckig计算的真yaw
-    if (qAbs(state.yaw) > 1e-6 || qAbs(state.roll) > 1e-6 || qAbs(state.pitch) > 1e-6) {
-        m_currentHeading = state.yaw;  // 6-DOF有真yaw
+    // 航向角：仅 6-DOF 模式使用 Ruckig 计算的真实 yaw 角旋转飞机
+    // 3-DOF/1-DOF 不旋转，飞机保持 0°（机头朝右）
+    if (m_dof == 6) {
+        m_currentHeading = state.yaw;
+    } else {
+        m_currentHeading = 0.0;
     }
 
     // 追加已飞路径
@@ -235,10 +244,18 @@ void FlightDisplayWidget::paintEvent(QPaintEvent* event)
     painter.setPen(QColor("#00d4ff"));
     QFont coordFont("Share Tech Mono", 8);
     painter.setFont(coordFont);
-    QString coordText = QString("X:%1  Y:%2  H:%3°")
-        .arg(m_currentX, 0, 'f', 1)
-        .arg(m_currentY, 0, 'f', 1)
-        .arg(m_currentHeading, 0, 'f', 1);
+    // 3-DOF 不显示航向角，只有 6-DOF 才显示 H
+    QString coordText;
+    if (m_dof == 6) {
+        coordText = QString("X:%1  Y:%2  H:%3°")
+            .arg(m_currentX, 0, 'f', 1)
+            .arg(m_currentY, 0, 'f', 1)
+            .arg(m_currentHeading, 0, 'f', 1);
+    } else {
+        coordText = QString("X:%1  Y:%2")
+            .arg(m_currentX, 0, 'f', 1)
+            .arg(m_currentY, 0, 'f', 1);
+    }
     painter.drawText(QPointF(m_margin, m_margin - 6), coordText);
 
     // ---- 图例 ----

@@ -5699,7 +5699,7 @@ max-height: 20px;</string>
            </widget>
           </item>
           <item>
-           <widget class="QTableWidget" name="tableTrajectory">
+           <widget class="QTableView" name="tableTrajectory">
             <property name="minimumSize">
              <size>
               <width>0</width>
@@ -5713,18 +5713,18 @@ max-height: 20px;</string>
              </size>
             </property>
             <property name="styleSheet">
-             <string notr="true">QTableWidget {
+             <string notr="true">QTableView {
     background-color: #040f1c;
     border: 1px solid rgba(0, 100, 160, 0.3);
     font-family: &quot;Share Tech Mono&quot;, monospace;
     font-size: 10px;
     gridline-color: rgba(0, 100, 160, 0.15);
 }
-QTableWidget::item {
+QTableView::item {
     color: #7aa8cc;
     padding: 4px 8px;
 }
-QTableWidget::item:selected {
+QTableView::item:selected {
     background-color: rgba(0, 212, 255, 0.15);
 }
 QHeaderView::section {
@@ -5797,43 +5797,6 @@ QScrollBar::sub-page:horizontal {
     background: transparent;
 }</string>
             </property>
-            <property name="columnCount">
-             <number>5</number>
-            </property>
-            <column>
-             <property name="text">
-              <string>T(s)</string>
-             </property>
-             <property name="font">
-              <font>
-               <kerning>true</kerning>
-               <fontweight>Thin</fontweight>
-              </font>
-             </property>
-             <property name="icon">
-              <iconset theme="轨迹数据表"/>
-             </property>
-            </column>
-            <column>
-             <property name="text">
-              <string>X(m)</string>
-             </property>
-            </column>
-            <column>
-             <property name="text">
-              <string>Y(m)</string>
-             </property>
-            </column>
-            <column>
-             <property name="text">
-              <string>Z(m)</string>
-             </property>
-            </column>
-            <column>
-             <property name="text">
-              <string>V(m/s)</string>
-             </property>
-            </column>
            </widget>
           </item>
           <item>
